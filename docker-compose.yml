@@ -1,0 +1,38 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+  api-gateway:
+    build: ./services/api-gateway
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./services/api-gateway:/app
+      - /app/node_modules
+  video-ingestion:
+    build: ./services/video-ingestion
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./services/video-ingestion:/app
+      - /app/node_modules
+  video-processing:
+    build: ./services/video-processing
+    env_file:
+      - .env
+    volumes:
+      - ./services/video-ingestion/uploads:/app/uploads
+  language-model:
+    build: ./services/language-model
+    env_file:
+      - .env
+
+networks:
+  default:
+    name: frameforge_network
+
+

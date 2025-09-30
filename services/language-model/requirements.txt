@@ -1,0 +1,4 @@
+Flask==2.1.2
+Werkzeug==2.2.2
+cerebras_cloud_sdk==1.50.1
+python-dotenv==1.0.0
