@@ -32,12 +32,17 @@ app.post('/upload', upload.single('video'), (req, res) => {
     }
     console.log('File uploaded:', req.file.path);
 
+    // *** THIS IS THE FIX ***
+    // Resolve the absolute path of the uploaded file
+    const absoluteVideoPath = path.resolve(req.file.path);
+
     const postData = JSON.stringify({
-        'video_path': req.file.path // Pass relative path within the container
+        // Pass the absolute path to the video-processing service
+        'video_path': absoluteVideoPath
     });
 
     const options = {
-        hostname: 'video-processing',
+        hostname: 'localhost', // Corrected for local debugging
         port: 5000,
         path: '/process',
         method: 'POST',
@@ -55,9 +60,7 @@ app.post('/upload', upload.single('video'), (req, res) => {
         response.on('end', () => {
             console.log('Analysis complete. Sending response to client.');
             try {
-                // The video-processing service sends back a JSON object
                 const analysisResult = JSON.parse(data);
-                 // The frontend expects the video path to be relative to the uploads folder
                 const relativePath = path.basename(req.file.path);
                 res.json({ videoPath: relativePath, analysis: analysisResult });
             } catch (e) {
@@ -90,4 +93,3 @@ app.get('/videos/:filename', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Video Ingestion Service listening on port ${PORT}`);
 });
-

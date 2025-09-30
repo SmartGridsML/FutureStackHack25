@@ -267,3 +267,7 @@ public/build/
 
 # Temporary folders
 .tmp/
+
+# Ignore uploads folder in video-ingestion
+services/video-ingestion/uploads/
+

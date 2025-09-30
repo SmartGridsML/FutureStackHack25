@@ -36,7 +36,7 @@ def query_model():
         print("--- Calling Cerebras Llama Model ---")
         chat_completion = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3-8b-instruct", # Using a common, powerful model
+            model="llama3.1-8b", # Using a common, powerful model
         )
         response_text = chat_completion.choices[0].message.content
         print(f"--- Got response: {response_text} ---")
