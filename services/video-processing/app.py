@@ -114,7 +114,7 @@ app = Flask(__name__)
 # --- Configure Gemini API ---
 try:
     genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-    vision_model = genai.GenerativeModel('gemini-pro-vision')
+    vision_model = genai.GenerativeModel('gemini-2.5-flash-lite')
     print("Gemini AI configured successfully.")
 except Exception as e:
     print(f"Error configuring Gemini AI: {e}")
