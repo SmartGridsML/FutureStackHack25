@@ -95,3 +95,4 @@ body {
   100% { transform: rotate(360deg); }
 }
 
+@import "~video.js/dist/video-js.css";
