@@ -26,7 +26,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-app.post('/upload', upload.single('video'), (req, res) => {
+app.post('/upload', upload.single('file'), (req, res) => {
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
     }
@@ -42,7 +42,7 @@ app.post('/upload', upload.single('video'), (req, res) => {
     });
 
     const options = {
-        hostname: 'localhost', // Corrected for local debugging
+        hostname: 'video-processing', // Corrected for local debugging
         port: 5000,
         path: '/process',
         method: 'POST',

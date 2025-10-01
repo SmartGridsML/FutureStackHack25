@@ -15,7 +15,7 @@ function Upload({ onUploadSuccess, onProcessing }) {
         }
 
         const formData = new FormData();
-        formData.append('video', selectedFile);
+        formData.append('file', selectedFile);
 
         onProcessing();
 
