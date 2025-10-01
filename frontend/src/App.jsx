@@ -11,7 +11,7 @@ function App() {
     const playerRef = useRef(null);
 
     const handleUploadSuccess = (videoPath, analysis) => {
-        setVideoUrl(`http://localhost:3000/videos/${videoPath}`);
+        setVideoUrl(`http://localhost:3001/videos/${videoPath}`);
         setAnalysisResult(analysis); // Already an object from axios
         setIsLoading(false);
         setStatusText('Analysis Complete!');
@@ -53,7 +53,7 @@ function App() {
                     <div className="results-grid">
                         <div className="card video-card">
                             <h3>Video Player</h3>
-                            {videoUrl && <Player videoUrl={videoUrl} playerRef={playerRef} />}
+                            {videoUrl && <Player key={videoUrl} videoUrl={videoUrl} playerRef={playerRef} />}
                         </div>
                         <div className="card summary-card">
                             <h3>AI Summary</h3>
