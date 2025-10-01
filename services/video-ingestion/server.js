@@ -43,7 +43,7 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
     const options = {
         hostname: 'video-processing', // Corrected for local debugging
-        port: 5000,
+        port: 5002,
         path: '/process',
         method: 'POST',
         headers: {

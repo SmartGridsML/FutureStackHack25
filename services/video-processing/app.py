@@ -187,7 +187,7 @@ def process_video():
     try:
         print("--- Querying Language Model for Summary ---")
         lang_model_response = requests.post(
-            'http://language-model:5001/query', # Corrected for local debugging
+            'http://language-model:5002/query', # Corrected for local debugging
             json={'context': scenes_context}
         )
         if lang_model_response.status_code == 200:
@@ -205,4 +205,4 @@ def process_video():
     })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5002)
