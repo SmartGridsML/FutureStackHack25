@@ -80,14 +80,14 @@ app.post('/upload', upload.single('file'), (req, res) => {
 });
 
 // Serve the video file
-app.get('/videos/:filename', (req, res) => {
-    const filePath = path.join(__dirname, 'uploads', req.params.filename);
-     if (fs.existsSync(filePath)) {
-        res.sendFile(filePath);
-    } else {
-        res.status(404).send('File not found.');
-    }
-});
+// app.get('/videos/:filename', (req, res) => {
+//     const filePath = path.join(__dirname, 'uploads', req.params.filename);
+//      if (fs.existsSync(filePath)) {
+//         res.sendFile(filePath);
+//     } else {
+//         res.status(404).send('File not found.');
+//     }
+// });
 
 
 app.listen(PORT, () => {
