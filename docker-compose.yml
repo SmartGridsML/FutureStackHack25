@@ -1,35 +1,72 @@
+version: '3.9'
 services:
-  frontend:
-    build: ./frontend
+  redis:
+    image: redis:7-alpine
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "6379:6379"
+
   api-gateway:
     build: ./services/api-gateway
     ports:
       - "3000:3000"
+    environment:
+      - VIDEO_INGESTION_URL=http://video-ingestion:3001
+      - VIDEO_PROCESSING_URL=http://video-processing:5000
+      - LANGUAGE_MODEL_URL=http://language-model:5001
+    depends_on:
+      - video-ingestion
+      - video-processing
+      - language-model
     volumes:
       - ./services/api-gateway:/app
       - /app/node_modules
+
   video-ingestion:
     build: ./services/video-ingestion
     ports:
       - "3001:3001"
+    environment:
+      - VIDEO_PROCESSING_URL=http://video-processing:5000
+      - LANGUAGE_MODEL_URL=http://language-model:5001
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - video-processing
+      - language-model
+      - redis
     volumes:
       - ./services/video-ingestion:/app
       - /app/node_modules
+      - ./services/video-ingestion/uploads:/app/uploads
+
   video-processing:
     build: ./services/video-processing
-    env_file:
-      - .env
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    expose:
+      - "5000"
+    depends_on:
+      - redis
     volumes:
       - ./services/video-ingestion/uploads:/app/uploads
+
   language-model:
     build: ./services/language-model
-    env_file:
-      - .env
+    environment:
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+    expose:
+      - "5001"
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE=http://localhost:3000
+    depends_on:
+      - api-gateway
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
 
 networks:
   default:

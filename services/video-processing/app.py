@@ -122,6 +122,8 @@ except Exception as e:
 
 # --- Constants ---
 MAX_FRAMES_TO_ANALYZE = 5
+LANG_MODEL_URL = os.environ.get("LANGUAGE_MODEL_URL", "http://language-model:5001")
+
 
 def analyze_frame(image_path):
     """Sends a single frame to Gemini for analysis."""
@@ -187,7 +189,7 @@ def process_video():
     try:
         print("--- Querying Language Model for Summary ---")
         lang_model_response = requests.post(
-            'http://localhost:5001/query', # Corrected for local debugging
+            f"{LANG_MODEL_URL}/query",
             json={'context': scenes_context}
         )
         if lang_model_response.status_code == 200:
@@ -205,4 +207,4 @@ def process_video():
     })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5002)

@@ -26,7 +26,7 @@ function Upload({ onUploadSuccess, onProcessing }) {
                     'Content-Type': 'multipart/form-data',
                 },
             });
-            onUploadSuccess(response.data.videoPath, response.data.analysis);
+            onUploadSuccess(response.data.videoId, response.data.videoPath, response.data.analysis);
         } catch (error) {
             console.error('Error uploading file:', error);
             alert('An error occurred during upload. Check the console for details.');

@@ -4,15 +4,20 @@ import Upload from './components/Upload';
 import Player from './components/Player';
 
 function App() {
+    const [videoId, setVideoId] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
     const [videoUrl, setVideoUrl] = useState('');
     const [analysisResult, setAnalysisResult] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [statusText, setStatusText] = useState('');
     const playerRef = useRef(null);
 
-    const handleUploadSuccess = (videoPath, analysis) => {
+    // FIX: correct parameters (was using videoIdReturned undefined)
+    const handleUploadSuccess = (videoIdReturned, videoPath, analysis) => {
+        setVideoId(videoIdReturned);
         setVideoUrl(`http://localhost:3001/videos/${videoPath}`);
-        setAnalysisResult(analysis); // Already an object from axios
+        setAnalysisResult(analysis);
         setIsLoading(false);
         setStatusText('Analysis Complete!');
     };
@@ -22,14 +27,25 @@ function App() {
         setStatusText('Uploading and processing video... this may take a moment.');
         setVideoUrl('');
         setAnalysisResult(null);
+        setSearchResults([]);
+        setVideoId('');
     };
 
     const handleSeek = (timestamp) => {
         const seconds = parseInt(timestamp, 10);
-        if (playerRef.current) {
+        if (playerRef.current?.seekTo) {
             playerRef.current.seekTo(seconds, 'seconds');
         }
     };
+
+    async function runSearch() {
+        if (!videoId || !searchQuery) return;
+        const r = await fetch(
+            `http://localhost:3000/search?videoId=${videoId}&q=${encodeURIComponent(searchQuery)}`
+        );
+        const data = await r.json();
+        setSearchResults(data.results || []);
+    }
 
     return (
         <div className="container">
@@ -38,8 +54,25 @@ function App() {
                 <p>Your AI-powered video analysis and summarization tool.</p>
             </header>
             <main>
+                {/* Upload UI now rendered */}
+                <Upload onUploadSuccess={handleUploadSuccess} onProcessing={handleProcessing} />
+
                 <div className="card">
-                    <Upload onUploadSuccess={handleUploadSuccess} onProcessing={handleProcessing} />
+                    <h3>Search Frames</h3>
+                    <input
+                        style={{ width: '70%' }}
+                        placeholder="Search e.g. coding diagram"
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                    />
+                    <button onClick={runSearch} disabled={!videoId || !searchQuery}>Search</button>
+                    <ul>
+                        {searchResults.map(r => (
+                            <li key={r.timestamp} onClick={() => handleSeek(r.timestamp)}>
+                                <strong>{r.timestamp}s (score {r.score})</strong> — {r.description.slice(0, 90)}...
+                            </li>
+                        ))}
+                    </ul>
                 </div>
 
                 {isLoading && (
@@ -51,15 +84,6 @@ function App() {
 
                 {analysisResult && (
                     <div className="results-grid">
-                        <div className="card video-card">
-                            <h3>Video Player</h3>
-                            {
-                                videoUrl && (
-                                    <video controls width="100%" src={videoUrl}>
-                                        Sorry, your browser doesn't support embedded videos.
-                                    </video>)
-                            /* {videoUrl && <Player videoUrl={videoUrl} playerRef={playerRef} />} */}
-                        </div>
                         <div className="card summary-card">
                             <h3>AI Summary</h3>
                             <p>{analysisResult.summary}</p>
@@ -69,12 +93,24 @@ function App() {
                             <ul>
                                 {analysisResult.scenes.map((scene, index) => (
                                     <li key={index} onClick={() => handleSeek(scene.timestamp)}>
-                                        <strong>{scene.timestamp}:</strong> {scene.description}
+                                        <strong>{scene.timestamp}s:</strong> {scene.description}
                                     </li>
                                 ))}
                             </ul>
                         </div>
                     </div>
+                )}
+
+                {videoUrl && (
+                    <Player
+                        videoUrl={videoUrl}
+                        playerRef={playerRef}
+                        analysisData={analysisResult}
+                        onProgress={(progress) => {
+                            // console.log('Video progress:', progress.playedSeconds);
+                        }}
+                        onSeek={handleSeek}
+                    />
                 )}
             </main>
         </div>
