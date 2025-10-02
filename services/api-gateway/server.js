@@ -1,81 +1,103 @@
-// const express = require('express');
-// const { createProxyMiddleware } = require('http-proxy-middleware');
-
-// const app = express();
-// const PORT = 3000;
-
-// // app.use('/api/upload', createProxyMiddleware({ target: 'http://video-ingestion:3001', changeOrigin: true }));
-// app.use('/api/upload', createProxyMiddleware({ target: 'http://localhost:3001', changeOrigin: true }));
-// // app.use('/videos', createProxyMiddleware({ target: 'http://video-ingestion:3001', changeOrigin: true }));
-// app.use('/videos', createProxyMiddleware({ target: 'http://localhost:3001', changeOrigin: true }));
-
-// app.listen(PORT, () => {
-//     console.log(`API Gateway listening on port ${PORT}`);
-// });
-
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const cors = require('cors');
+const cluster = require('cluster'); // Added for multi-core utilization
+const os = require('os'); // Added for CPU detection
 
-const VIDEO_INGESTION_URL = process.env.VIDEO_INGESTION_URL || 'http://video-ingestion:3001';
-const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || 'http://localhost:5173';
+// Number of CPU cores to utilize
+const numCPUs = os.cpus().length;
 
-const app = express();
-const PORT = 3000;
-
-// CORS configuration
-app.use(cors({
-  origin: ALLOW_ORIGIN,
-  methods: ['GET','POST','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
-}));
-
-// Handle preflight requests
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', ALLOW_ORIGIN);
-  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
-
-// Health check endpoint
-app.get('/health', (_req, res) => res.json({ status: 'ok', upstream: VIDEO_INGESTION_URL }));
-
-// Main API proxy
-app.use('/api', createProxyMiddleware({
-  target: VIDEO_INGESTION_URL,
-  changeOrigin: true,
-  pathRewrite: { '^/api': '' }
-}));
-
-app.use('/search', createProxyMiddleware({
-  target: VIDEO_INGESTION_URL, // Should be http://video-ingestion:3001
-  changeOrigin: true,
-  onProxyReq: (proxyReq, req) => {
-    console.log(`[Gateway] Proxying search request to: ${VIDEO_INGESTION_URL}/search`);
-  },
-  onError: (err, req, res) => {
-    console.error('[Gateway] Search proxy error:', err.message);
-    if (!res.headersSent) {
-      res.status(502).json({ error: 'Search service unavailable' });
-    }
+// Clustering for multi-core performance
+if (cluster.isPrimary) {
+  console.log(`Primary ${process.pid} is running on ${numCPUs} cores`);
+  
+  // Fork workers
+  for (let i = 0; i < numCPUs; i++) {
+    cluster.fork();
   }
-}));
+  
+  // Handle worker exit and restart
+  cluster.on('exit', (worker, code, signal) => {
+    console.log(`Worker ${worker.process.pid} died (${signal || code}). Restarting...`);
+    cluster.fork();
+  });
+} else {
+  // Worker code - the actual Express app
+  const VIDEO_INGESTION_URL = process.env.VIDEO_INGESTION_URL || 'http://video-ingestion:3001';
+  const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || 'http://localhost:5173';
 
-// Add video status proxy
-app.use('/video', createProxyMiddleware({
-  target: VIDEO_INGESTION_URL,
-  changeOrigin: true
-}));
+  const app = express();
+  const PORT = 3000;
 
-// Videos proxy for media files
-app.use('/videos', createProxyMiddleware({
-  target: VIDEO_INGESTION_URL,
-  changeOrigin: true
-}));
+  // CORS configuration
+  app.use(cors({
+    origin: ALLOW_ORIGIN,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  }));
 
-app.listen(PORT, () => {
-  console.log(`API Gateway listening on port ${PORT}`);
-  console.log(`VIDEO_INGESTION_URL=${VIDEO_INGESTION_URL}`);
-});
+  // Handle preflight requests
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', ALLOW_ORIGIN);
+    res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+  });
+
+  // Health check endpoint with worker ID for debugging
+  app.get('/health', (_req, res) => res.json({ 
+    status: 'ok', 
+    upstream: VIDEO_INGESTION_URL,
+    worker: process.pid 
+  }));
+
+  // Common proxy options
+  const proxyOptions = {
+    target: VIDEO_INGESTION_URL,
+    changeOrigin: true,
+    proxyTimeout: 120000, // 2 minutes
+    timeout: 120000,
+  };
+
+  // Main API proxy - for /upload etc.
+  app.use('/api', createProxyMiddleware({
+    ...proxyOptions,
+    pathRewrite: { '^/api': '' },
+    onProxyReq: (proxyReq, req) => {
+      console.log(`[Worker ${process.pid}] API: ${req.method} ${req.url} -> ${VIDEO_INGESTION_URL}${proxyReq.path}`);
+    },
+    onError: (err, req, res) => {
+      console.error(`[Worker ${process.pid}] API error:`, err.message);
+      if (!res.headersSent) res.status(502).json({ error: 'API service unavailable' });
+    }
+  }));
+
+  app.use('/search', createProxyMiddleware({
+    ...proxyOptions,
+    onProxyReq: (proxyReq, req) => {
+      console.log(`[Worker ${process.pid}] Search: ${req.method} ${req.originalUrl} -> ${VIDEO_INGESTION_URL}${proxyReq.path}`);
+    },
+    onError: (err, req, res) => {
+      console.error(`[Worker ${process.pid}] Search error:`, err.message);
+      if (!res.headersSent) res.status(502).json({ error: 'Search service unavailable' });
+    }
+  }));
+  // Video proxy - FIX: Ensure the entire path (including /status) is preserved
+  app.use('/video', createProxyMiddleware({
+    ...proxyOptions,
+    onProxyReq: (proxyReq, req) => {
+      // Log the actual destination path that http-proxy-middleware will use
+      console.log(`[Worker ${process.pid}] Video: ${req.method} ${req.originalUrl} -> ${VIDEO_INGESTION_URL}${proxyReq.path}`);
+    },
+    onError: (err, req, res) => {
+      console.error(`[Worker ${process.pid}] Video error:`, err.message);
+      if (!res.headersSent) res.status(502).json({ error: 'Video service unavailable' });
+    }
+  }));
+
+  app.listen(PORT, () => {
+    console.log(`Worker ${process.pid}: API Gateway listening on port ${PORT}`);
+    console.log(`VIDEO_INGESTION_URL=${VIDEO_INGESTION_URL}`);
+  });
+}
