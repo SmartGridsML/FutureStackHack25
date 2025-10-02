@@ -184,15 +184,6 @@ app.get('/search', async (req, res) => {
     res.json({ videoId, query: q, tokens, results });
 });
 
-// app.use('/search', createProxyMiddleware({
-//   target: VIDEO_INGESTION_URL,
-//   changeOrigin: true
-// }));
-// app.use('/video', createProxyMiddleware({
-//   target: VIDEO_INGESTION_URL,
-//   changeOrigin: true
-// }));
-
 
 
 app.listen(PORT, () => {
