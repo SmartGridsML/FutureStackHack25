@@ -21,6 +21,7 @@ services:
       - video-ingestion
       - video-processing
       - language-model
+      - audio-processing
     volumes:
       - ./services/api-gateway:/app
       - /app/node_modules
@@ -33,11 +34,13 @@ services:
       - VIDEO_PROCESSING_URL=http://video-processing:5000
       - LANGUAGE_MODEL_URL=http://language-model:5001
       - REDIS_URL=redis://redis:6379
+      - AUDIO_PROCESSING_URL=http://audio-processing:5004
     depends_on:
       - video-processing
       - language-model
       - redis
       - data-store
+      - audio-processing
     volumes:
       - ./services/video-ingestion:/app
       - /app/node_modules
@@ -85,6 +88,15 @@ services:
     volumes:
       - ./services/data-store:/app
       - /app/node_modules
+  
+  audio-processing:
+    build: ./services/audio-processing
+    ports:
+      - "5004:5004"
+    depends_on:
+      - redis
+    volumes:
+      - ./services/video-ingestion/uploads:/app/uploads
 
 networks:
   default:
@@ -92,5 +104,3 @@ networks:
 
 volumes:
   qdrant_data:
-
-

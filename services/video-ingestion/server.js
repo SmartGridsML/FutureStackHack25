@@ -4,10 +4,11 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { randomUUID } = require('crypto');   // <-- add
+const { randomUUID } = require('crypto');
 const VIDEO_PROCESSING_URL = process.env.VIDEO_PROCESSING_URL || 'http://localhost:5000';
 const LANGUAGE_MODEL_URL = process.env.LANGUAGE_MODEL_URL || 'http://localhost:5001';
 const DATA_STORE_URL = process.env.DATA_STORE_URL || 'http://data-store:4005';
+const AUDIO_PROCESSING_URL = process.env.AUDIO_PROCESSING_URL || 'http://localhost:5004';
 const app = express();
 const PORT = 3001;
 const Redis = require('ioredis');
@@ -32,61 +33,86 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-app.post('/upload', upload.single('video'), (req, res) => {
+app.post('/upload', upload.single('video'), async (req, res) => {
     if (!req.file) return res.status(400).send('No file uploaded.');
     const videoId = randomUUID();
     console.log('File uploaded:', req.file.path);
 
     const absoluteVideoPath = path.resolve(req.file.path);
-    const postData = JSON.stringify({ video_path: absoluteVideoPath });
-    const processEndpoint = new URL('/process', VIDEO_PROCESSING_URL);
 
-    const options = {
-        hostname: processEndpoint.hostname,
-        port: processEndpoint.port,
-        path: processEndpoint.pathname,
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(postData)
+    try {
+        const [analysisResult, transcriptResult] = await Promise.all([
+            processVideo(absoluteVideoPath),
+            transcribeAudio(absoluteVideoPath)
+        ]);
+
+        const relativePath = path.basename(req.file.path);
+
+        if (Array.isArray(analysisResult.scenes)) {
+            await indexScenes(videoId, analysisResult.scenes);
         }
-    };
 
-    const request = http.request(options, (response) => {
-        let data = '';
-        response.on('data', chunk => data += chunk);
-        response.on('end', async () => {
-            try {
-                const analysisResult = JSON.parse(data);
-                const relativePath = path.basename(req.file.path);
+        analysisResult.videoId = videoId;
 
-                if (Array.isArray(analysisResult.scenes)) {
-                    await indexScenes(videoId, analysisResult.scenes);
-                }
-
-                // Embed videoId into analysis for simpler frontend logic
-                analysisResult.videoId = videoId;
-
-                res.json({
-                    videoId,
-                    videoPath: relativePath,
-                    analysis: analysisResult
-                });
-            } catch (e) {
-                console.error("Parse / indexing error:", e);
-                res.status(502).send("Failed to process analysis.");
-            }
+        res.json({
+            videoId,
+            videoPath: relativePath,
+            analysis: analysisResult,
+            transcript: transcriptResult.transcript
         });
-    });
-
-    request.on('error', (e) => {
-        console.error('Processing request error:', e.message);
-        res.status(502).send('Failed to process video');
-    });
-
-    request.write(postData);
-    request.end();
+    } catch (e) {
+        console.error("Error processing video:", e);
+        res.status(502).send("Failed to process video.");
+    }
 });
+
+function processVideo(videoPath) {
+    return new Promise((resolve, reject) => {
+        const postData = JSON.stringify({ video_path: videoPath });
+        const processEndpoint = new URL('/process', VIDEO_PROCESSING_URL);
+
+        const options = {
+            hostname: processEndpoint.hostname,
+            port: processEndpoint.port,
+            path: processEndpoint.pathname,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+
+        const request = http.request(options, (response) => {
+            let data = '';
+            response.on('data', chunk => data += chunk);
+            response.on('end', () => {
+                try {
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+
+        request.on('error', (e) => reject(e));
+        request.write(postData);
+        request.end();
+    });
+}
+
+async function transcribeAudio(videoPath) {
+    const response = await fetch(`${AUDIO_PROCESSING_URL}/transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_path: videoPath })
+    });
+
+    if (!response.ok) {
+        throw new Error(`Audio processing failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
 
 
 // Serve the video file
