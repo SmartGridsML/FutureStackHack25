@@ -4,12 +4,15 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { randomUUID } = require('crypto');   // <-- add
+const { randomUUID } = require('crypto');
 const VIDEO_PROCESSING_URL = process.env.VIDEO_PROCESSING_URL || 'http://localhost:5000';
 const LANGUAGE_MODEL_URL = process.env.LANGUAGE_MODEL_URL || 'http://localhost:5001';
+const DATA_STORE_URL = process.env.DATA_STORE_URL || 'http://data-store:4005';
+const AUDIO_PROCESSING_URL = process.env.AUDIO_PROCESSING_URL || 'http://localhost:5004';
 const app = express();
 const PORT = 3001;
 const Redis = require('ioredis');
+const fetch = require('node-fetch');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 app.use(cors());
@@ -30,61 +33,156 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-app.post('/upload', upload.single('video'), (req, res) => {
+app.post('/upload', upload.single('video'), async (req, res) => {
     if (!req.file) return res.status(400).send('No file uploaded.');
     const videoId = randomUUID();
     console.log('File uploaded:', req.file.path);
 
     const absoluteVideoPath = path.resolve(req.file.path);
-    const postData = JSON.stringify({ video_path: absoluteVideoPath });
-    const processEndpoint = new URL('/process', VIDEO_PROCESSING_URL);
 
-    const options = {
-        hostname: processEndpoint.hostname,
-        port: processEndpoint.port,
-        path: processEndpoint.pathname,
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(postData)
+    try {
+        const [analysisResult, transcriptResult] = await Promise.all([
+            processVideo(absoluteVideoPath),
+            transcribeAudio(absoluteVideoPath)
+        ]);
+
+        const relativePath = path.basename(req.file.path);
+
+        if (Array.isArray(analysisResult.scenes)) {
+            await indexScenes(videoId, analysisResult.scenes);
         }
-    };
 
-    const request = http.request(options, (response) => {
-        let data = '';
-        response.on('data', chunk => data += chunk);
-        response.on('end', async () => {
-            try {
-                const analysisResult = JSON.parse(data);
-                const relativePath = path.basename(req.file.path);
+        if (transcriptResult.transcript && Array.isArray(transcriptResult.transcript.segments)) {
+            // console.log('Segments found: ', transcriptResult.transcript.segments)
+            await indexTranscript(videoId, transcriptResult.transcript.segments);
+        }
+        else {
+            console.log('transcribed object not recognised');
+            console.log('transcriptResult: ', transcriptResult.transcript);
+            console.log('transcriptResult.segments: ', transcriptResult.transcript.segments);
+            console.log('Array.isArray(transcriptResult.segments) ', Array.isArray(transcriptResult.transcript.segments));
+        }
 
-                if (Array.isArray(analysisResult.scenes)) {
-                    await indexScenes(videoId, analysisResult.scenes);
-                }
+        analysisResult.videoId = videoId;
 
-                // Embed videoId into analysis for simpler frontend logic
-                analysisResult.videoId = videoId;
-
-                res.json({
-                    videoId,
-                    videoPath: relativePath,
-                    analysis: analysisResult
-                });
-            } catch (e) {
-                console.error("Parse / indexing error:", e);
-                res.status(502).send("Failed to process analysis.");
-            }
+        res.json({
+            videoId,
+            videoPath: relativePath,
+            analysis: analysisResult,
+            transcript: transcriptResult.transcript
         });
-    });
-
-    request.on('error', (e) => {
-        console.error('Processing request error:', e.message);
-        res.status(502).send('Failed to process video');
-    });
-
-    request.write(postData);
-    request.end();
+    } catch (e) {
+        console.error("Error processing video:", e);
+        res.status(502).send("Failed to process video.");
+    }
 });
+
+function processVideo(videoPath) {
+    return new Promise((resolve, reject) => {
+        const postData = JSON.stringify({ video_path: videoPath });
+        const processEndpoint = new URL('/process', VIDEO_PROCESSING_URL);
+
+        const options = {
+            hostname: processEndpoint.hostname,
+            port: processEndpoint.port,
+            path: processEndpoint.pathname,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+
+        const request = http.request(options, (response) => {
+            let data = '';
+            response.on('data', chunk => data += chunk);
+            response.on('end', () => {
+                try {
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+
+        request.on('error', (e) => reject(e));
+        request.write(postData);
+        request.end();
+    });
+}
+
+async function transcribeAudio(videoPath) {
+    const response = await fetch(`${AUDIO_PROCESSING_URL}/transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_path: videoPath })
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Audio processing failed with status ${response.status}: ${errorBody}`);
+    }
+
+    return response.json();
+}
+
+
+async function indexTranscript(videoId, segments) {
+    const pipeline = redis.pipeline();
+    pipeline.hset(`video:status:${videoId}`, { totalSentences: segments.length, indexedSentences: 0 });
+
+    segments.forEach((segment, index) => {
+        const { text, start, end } = segment;
+        const sentenceKey = `transcript:${videoId}:${index}`;
+
+        // Store transcript sentence in Redis
+        pipeline.hset(sentenceKey, {
+            videoId,
+            text,
+            start,
+            end
+        });
+
+        // Maintain sentence list
+        pipeline.rpush(`transcript:list:${videoId}`, index);
+
+        // Tokenize transcript for keyword search
+        const tokens = tokenize(text);
+        tokens.forEach(tok => pipeline.sadd(`idx:token:${tok}`, `${videoId}:t${index}`));
+
+        // Update progress
+        pipeline.hincrby(`video:status:${videoId}`, 'indexedSentences', 1);
+    });
+
+    await pipeline.exec();
+    console.log(`[transcript-index] video=${videoId} sentences=${segments.length}`);
+
+    // ---- Send transcripts to semantic indexer ----
+    try {
+        const response = await fetch(`${DATA_STORE_URL}/embeddings/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                videoId,
+                transcript: segments.map((s, idx) => ({
+                    index: idx,
+                    start: s.start,
+                    end: s.end,
+                    text: s.text
+                }))
+            })
+        });
+
+        if (response.ok) {
+            console.log(`[semantic-index] transcript video=${videoId} processed`);
+        } else {
+            console.error(`[semantic-index] transcript failed for video=${videoId}: ${response.status}`);
+        }
+    } catch (error) {
+        console.error(`[semantic-index] transcript error for video=${videoId}:`, error.message);
+    }
+}
+
 
 
 // Serve the video file
@@ -132,9 +230,56 @@ async function indexScenes(videoId, scenes) {
 
     await pipeline.exec();
     console.log(`[index] video=${videoId} frames=${scenes.length}`);
+
+    // Send to data-store for semantic indexing
+    try {
+        const response = await fetch(`${DATA_STORE_URL}/embeddings/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                videoId,
+                frames: scenes.map(scene => ({
+                    timestamp: typeof scene.timestamp === 'string' 
+                        ? parseInt(scene.timestamp) || parseInt(scene.timestamp.replace(/\D/g,''),10)
+                        : scene.timestamp,
+                    description: scene.description
+                }))
+            })
+        });
+
+        if (response.ok) {
+            console.log(`[semantic-index] video=${videoId} processed`);
+        } else {
+            console.error(`[semantic-index] failed for video=${videoId}: ${response.status}`);
+        }
+    } catch (error) {
+        console.error(`[semantic-index] error for video=${videoId}:`, error.message);
+    }
 }
 
-app.use('/videos', express.static(path.join(__dirname, 'uploads')));
+// Add semantic search endpoint
+app.get('/semantic-search', async (req, res) => {
+    const { videoId, q, k } = req.query;
+    if (!videoId || !q) {
+        return res.status(400).json({ error: 'videoId and q required' });
+    }
+
+    try {
+        const response = await fetch(
+            `${DATA_STORE_URL}/search/semantic?videoId=${encodeURIComponent(videoId)}&q=${encodeURIComponent(q)}&k=${k || 10}`
+        );
+
+        if (!response.ok) {
+            throw new Error(`Data-store responded with ${response.status}`);
+        }
+
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Semantic search proxy error:', error);
+        res.status(500).json({ error: 'Semantic search failed' });
+    }
+});
 
 
 // Status endpoint
@@ -146,7 +291,10 @@ app.get('/video/:id/status', async (req, res) => {
         videoId: vid,
         totalFrames: parseInt(status.totalFrames || 0),
         indexedFrames: parseInt(status.indexedFrames || 0),
-        progress: status.totalFrames ? (parseInt(status.indexedFrames || 0) / parseInt(status.totalFrames || 1)) : 0
+        progress: status.totalFrames ? (parseInt(status.indexedFrames || 0) / parseInt(status.totalFrames || 1)) : 0,
+        totalSentences: parseInt(status.totalSentences || 0),
+        indexedSentences: parseInt(status.indexedSentences || 0),
+        transcriptProgress: status.totalSentences ? (parseInt(status.indexedSentences || 0) / parseInt(status.totalSentences || 1)) : 0
     });
 });
 
@@ -183,15 +331,6 @@ app.get('/search', async (req, res) => {
 
     res.json({ videoId, query: q, tokens, results });
 });
-
-// app.use('/search', createProxyMiddleware({
-//   target: VIDEO_INGESTION_URL,
-//   changeOrigin: true
-// }));
-// app.use('/video', createProxyMiddleware({
-//   target: VIDEO_INGESTION_URL,
-//   changeOrigin: true
-// }));
 
 
 

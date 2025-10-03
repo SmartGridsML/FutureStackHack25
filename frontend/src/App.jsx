@@ -11,9 +11,9 @@ function App() {
     const [analysisResult, setAnalysisResult] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [statusText, setStatusText] = useState('');
+    const [searchType, setSearchType] = useState('lexical');
     const playerRef = useRef(null);
 
-    // FIX: correct parameters (was using videoIdReturned undefined)
     const handleUploadSuccess = (videoIdReturned, videoPath, analysis) => {
         setVideoId(videoIdReturned);
         setVideoUrl(`http://localhost:3001/videos/${videoPath}`);
@@ -38,13 +38,22 @@ function App() {
         }
     };
 
+    // FIX: Updated to handle unified search results
     async function runSearch() {
         if (!videoId || !searchQuery) return;
+        
+        const endpoint = searchType === 'semantic' ? 'semantic-search' : 'search';
         const r = await fetch(
-            `http://localhost:3000/search?videoId=${videoId}&q=${encodeURIComponent(searchQuery)}`
+            `http://localhost:3000/${endpoint}?videoId=${videoId}&q=${encodeURIComponent(searchQuery)}`
         );
         const data = await r.json();
-        setSearchResults(data.results || []);
+
+        if (searchType === 'semantic') {
+            const sortedResults = (data.results || []).sort((a, b) => (a.timestamp || a.start) - (b.timestamp || b.start));
+            setSearchResults(sortedResults);
+        } else {
+            setSearchResults(data.results || []);
+        }
     }
 
     return (
@@ -54,22 +63,53 @@ function App() {
                 <p>Your AI-powered video analysis and summarization tool.</p>
             </header>
             <main>
-                {/* Upload UI now rendered */}
                 <Upload onUploadSuccess={handleUploadSuccess} onProcessing={handleProcessing} />
 
                 <div className="card">
                     <h3>Search Frames</h3>
+                    <div style={{ marginBottom: '10px' }}>
+                        <label>
+                            <input
+                                type="radio"
+                                value="lexical"
+                                checked={searchType === 'lexical'}
+                                onChange={(e) => setSearchType(e.target.value)}
+                            />
+                            Keyword Search
+                        </label>
+                        <label style={{ marginLeft: '20px' }}>
+                            <input
+                                type="radio"
+                                value="semantic"
+                                checked={searchType === 'semantic'}
+                                onChange={(e) => setSearchType(e.target.value)}
+                            />
+                            Semantic Search
+                        </label>
+                    </div>
                     <input
                         style={{ width: '70%' }}
-                        placeholder="Search e.g. coding diagram"
+                        placeholder={searchType === 'semantic' ? 
+                            'Search e.g. "explain machine learning concepts"' : 
+                            'Search e.g. "neural network"'
+                        }
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
                     />
-                    <button onClick={runSearch} disabled={!videoId || !searchQuery}>Search</button>
+                    <button onClick={runSearch} disabled={!videoId || !searchQuery}>
+                        {searchType === 'semantic' ? 'Semantic Search' : 'Keyword Search'}
+                    </button>
                     <ul>
-                        {searchResults.map(r => (
-                            <li key={r.timestamp} onClick={() => handleSeek(r.timestamp)}>
-                                <strong>{r.timestamp}s (score {r.score})</strong> — {r.description.slice(0, 90)}...
+                        {/* FIX: Updated rendering to handle both lexical and semantic results */}
+                        {searchResults.map((r, index) => (
+                            <li key={`${r.type || 'lexical'}-${r.timestamp || r.start}-${index}`} onClick={() => handleSeek(r.timestamp || r.start)}>
+                                <strong>
+                                    {r.timestamp || r.start}s 
+                                    {searchType === 'semantic' ? 
+                                        ` (similarity: ${(r.score * 100).toFixed(1)}%)` : 
+                                        ` (score: ${r.score})`
+                                    }
+                                </strong> — {(r.text || r.description || '').slice(0, 90)}...
                             </li>
                         ))}
                     </ul>
@@ -118,4 +158,3 @@ function App() {
 }
 
 export default App;
-

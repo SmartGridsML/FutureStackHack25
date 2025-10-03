@@ -271,3 +271,4 @@ public/build/
 # Ignore uploads folder in video-ingestion
 services/video-ingestion/uploads/
 
+node_modules/
