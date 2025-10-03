@@ -5,17 +5,19 @@ import os
 
 app = Flask(__name__)
 
+# Load model ONCE at startup
+model = whisper.load_model("tiny", device="cpu")
+
 @app.route('/transcribe', methods=['POST'])
 def transcribe_audio():
     video_path = request.json['video_path']
     audio = AudioSegment.from_file(video_path)
     audio.export("temp.wav", format="wav")
-    
+
     try:
         audio = whisper.load_audio("temp.wav")
-        model = whisper.load_model("tiny", device="cpu")
         result = whisper.transcribe(model, audio, language="en")
-        
+
         print(f"Transcript: {result}", flush=True)
         return jsonify({'transcript': result})
     except Exception as e:

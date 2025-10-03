@@ -171,34 +171,79 @@ async function semanticSearch(videoId, queryEmbedding, k = 10) {
 // API Endpoints
 app.post('/embeddings/batch', async (req, res) => {
   try {
-    const { videoId, frames } = req.body;
-    
-    if (!videoId || !frames || !Array.isArray(frames)) {
-      return res.status(400).json({ error: 'videoId and frames array required' });
+    const { videoId, frames, transcript } = req.body;
+
+    if (!videoId) {
+      return res.status(400).json({ error: 'videoId required' });
     }
 
-    console.log(`Processing embeddings for video ${videoId}, ${frames.length} frames`);
+    let items = [];
+    let mode = "";
 
-    // Generate embeddings for frames
-    const frameVectors = await Promise.all(
-      frames.map(async frame => ({
-        timestamp: frame.timestamp,
-        description: frame.description,
-        embedding: await getEmbedding(frame.description)
+    if (Array.isArray(frames)) {
+      items = frames.map(f => ({
+        id: generateUUIDFromString(`${videoId}:frame:${f.timestamp}`),
+        text: f.description,
+        timestamp: f.timestamp,
+        type: 'frame'
+      }));
+      mode = "frames";
+    } else if (Array.isArray(transcript)) {
+      items = transcript.map(s => ({
+        id: generateUUIDFromString(`${videoId}:transcript:${s.index}`),
+        text: s.text,
+        start: s.start,
+        end: s.end,
+        type: 'transcript'
+      }));
+      mode = "transcript";
+    } else {
+      return res.status(400).json({ error: 'frames or transcript array required' });
+    }
+
+    console.log(`Processing embeddings for video ${videoId}, ${items.length} ${mode}`);
+
+    // Generate embeddings
+    const vectors = await Promise.all(
+      items.map(async item => ({
+        id: item.id,
+        vector: await getEmbedding(item.text),
+        payload: {
+          videoId,
+          type: item.type,
+          text: item.text,
+          timestamp: item.timestamp,
+          start: item.start,
+          end: item.end,
+          embedding_version: genAI ? 2 : 1
+        }
       }))
     );
 
-    await upsertFrameVectors(videoId, frameVectors);
-    res.json({ 
-      status: 'ok', 
-      processed: frameVectors.length,
+    // Upsert into Qdrant
+    const resQ = await fetch(`${QDRANT_URL}/collections/${COLLECTION}/points?wait=true`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: vectors })
+    });
+
+    if (!resQ.ok) {
+      throw new Error(`Qdrant upsert failed: ${resQ.status} ${await resQ.text()}`);
+    }
+
+    res.json({
+      status: 'ok',
+      processed: vectors.length,
+      type: mode,
       embedding_type: genAI ? 'google_ai' : 'hash_based'
     });
+
   } catch (error) {
     console.error('Embedding batch error:', error);
     res.status(500).json({ error: 'Failed to process embeddings', details: error.message });
   }
 });
+
 
 app.get('/search/semantic', async (req, res) => {
   try {

@@ -53,7 +53,14 @@ app.post('/upload', upload.single('video'), async (req, res) => {
         }
 
         if (transcriptResult.transcript && Array.isArray(transcriptResult.transcript.segments)) {
+            // console.log('Segments found: ', transcriptResult.transcript.segments)
             await indexTranscript(videoId, transcriptResult.transcript.segments);
+        }
+        else {
+            console.log('transcribed object not recognised');
+            console.log('transcriptResult: ', transcriptResult.transcript);
+            console.log('transcriptResult.segments: ', transcriptResult.transcript.segments);
+            console.log('Array.isArray(transcriptResult.segments) ', Array.isArray(transcriptResult.transcript.segments));
         }
 
         analysisResult.videoId = videoId;
@@ -112,11 +119,13 @@ async function transcribeAudio(videoPath) {
     });
 
     if (!response.ok) {
-        throw new Error(`Audio processing failed with status ${response.status}`);
+        const errorBody = await response.text();
+        throw new Error(`Audio processing failed with status ${response.status}: ${errorBody}`);
     }
 
     return response.json();
 }
+
 
 async function indexTranscript(videoId, segments) {
     const pipeline = redis.pipeline();
@@ -125,19 +134,55 @@ async function indexTranscript(videoId, segments) {
     segments.forEach((segment, index) => {
         const { text, start, end } = segment;
         const sentenceKey = `transcript:${videoId}:${index}`;
+
+        // Store transcript sentence in Redis
         pipeline.hset(sentenceKey, {
             videoId,
             text,
             start,
             end
         });
+
+        // Maintain sentence list
         pipeline.rpush(`transcript:list:${videoId}`, index);
+
+        // Tokenize transcript for keyword search
+        const tokens = tokenize(text);
+        tokens.forEach(tok => pipeline.sadd(`idx:token:${tok}`, `${videoId}:t${index}`));
+
+        // Update progress
         pipeline.hincrby(`video:status:${videoId}`, 'indexedSentences', 1);
     });
 
     await pipeline.exec();
     console.log(`[transcript-index] video=${videoId} sentences=${segments.length}`);
+
+    // ---- Send transcripts to semantic indexer ----
+    try {
+        const response = await fetch(`${DATA_STORE_URL}/embeddings/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                videoId,
+                transcript: segments.map((s, idx) => ({
+                    index: idx,
+                    start: s.start,
+                    end: s.end,
+                    text: s.text
+                }))
+            })
+        });
+
+        if (response.ok) {
+            console.log(`[semantic-index] transcript video=${videoId} processed`);
+        } else {
+            console.error(`[semantic-index] transcript failed for video=${videoId}: ${response.status}`);
+        }
+    } catch (error) {
+        console.error(`[semantic-index] transcript error for video=${videoId}:`, error.message);
+    }
 }
+
 
 
 // Serve the video file
