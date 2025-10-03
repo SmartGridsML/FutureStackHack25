@@ -17,6 +17,9 @@ COPY package*.json ./
 
 # # Install dependencies
 RUN npm install ioredis && npm install
+
+# RUN npm install ioredis && npm install node-fetch && npm install
+
 # RUN npm install
 
 # RUN npm ci
