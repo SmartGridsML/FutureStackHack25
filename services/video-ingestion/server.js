@@ -41,10 +41,17 @@ app.post('/upload', upload.single('video'), async (req, res) => {
     const absoluteVideoPath = path.resolve(req.file.path);
 
     try {
-        const [analysisResult, transcriptResult] = await Promise.all([
-            processVideo(absoluteVideoPath),
-            transcribeAudio(absoluteVideoPath)
-        ]);
+        // Process video analysis first
+        const analysisResult = await processVideo(absoluteVideoPath);
+        let transcriptResult = null;
+
+        // Try to process audio, but continue if it fails
+        try {
+            transcriptResult = await transcribeAudio(absoluteVideoPath);
+        } catch (audioError) {
+            console.warn("Audio processing failed, continuing without transcript:", audioError.message);
+            transcriptResult = { transcript: null };
+        }
 
         const relativePath = path.basename(req.file.path);
 
@@ -52,15 +59,17 @@ app.post('/upload', upload.single('video'), async (req, res) => {
             await indexScenes(videoId, analysisResult.scenes);
         }
 
-        if (transcriptResult.transcript && Array.isArray(transcriptResult.transcript.segments)) {
+        if (transcriptResult && transcriptResult.transcript && Array.isArray(transcriptResult.transcript.segments)) {
             // console.log('Segments found: ', transcriptResult.transcript.segments)
             await indexTranscript(videoId, transcriptResult.transcript.segments);
         }
         else {
-            console.log('transcribed object not recognised');
-            console.log('transcriptResult: ', transcriptResult.transcript);
-            console.log('transcriptResult.segments: ', transcriptResult.transcript.segments);
-            console.log('Array.isArray(transcriptResult.segments) ', Array.isArray(transcriptResult.transcript.segments));
+            console.log('No transcript available or transcribed object not recognised');
+            if (transcriptResult && transcriptResult.transcript) {
+                console.log('transcriptResult: ', transcriptResult.transcript);
+                console.log('transcriptResult.segments: ', transcriptResult.transcript.segments);
+                console.log('Array.isArray(transcriptResult.segments) ', Array.isArray(transcriptResult.transcript.segments));
+            }
         }
 
         analysisResult.videoId = videoId;
@@ -69,7 +78,7 @@ app.post('/upload', upload.single('video'), async (req, res) => {
             videoId,
             videoPath: relativePath,
             analysis: analysisResult,
-            transcript: transcriptResult.transcript
+            transcript: transcriptResult ? transcriptResult.transcript : null
         });
     } catch (e) {
         console.error("Error processing video:", e);
