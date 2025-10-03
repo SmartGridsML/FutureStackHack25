@@ -7,8 +7,19 @@ WORKDIR /app
 # Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Install dependencies
+# # Remove existing node_modules and lock files
+# RUN rm -rf node_modules package-lock.json yarn.lock
+
+# # Clear npm cache
+# RUN npm cache clean --force
+
+# RUN npm install --save path-to-regexp
+
+# # Install dependencies
 RUN npm install ioredis && npm install
+# RUN npm install
+
+# RUN npm ci
 
 # Copy the rest of your app's source code
 COPY . .
