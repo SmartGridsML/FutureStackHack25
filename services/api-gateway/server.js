@@ -84,19 +84,16 @@ if (cluster.isPrimary) {
     }
   }));
 
-//   app.use('/search', createProxyMiddleware({
-//   target: VIDEO_INGESTION_URL, // This should be http://video-ingestion:3001
-//   changeOrigin: true,
-//   logLevel: 'debug',
-//   onProxyReq: (proxyReq, req) => {
-//     console.log(`[Gateway] Search request: ${req.url} -> ${VIDEO_INGESTION_URL}/search${req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''}`);
-//   },
-//   onError: (err, req, res) => {
-//     console.error(`[Gateway] Search error: ${err.message}`);
-//     res.status(502).json({ error: 'Search service unavailable' });
-//   }
-// }));
-
+  app.use('/semantic-search', createProxyMiddleware({
+    ...proxyOptions,
+    pathRewrite: (path, req) => req.originalUrl,
+    onProxyReq: (proxyReq, req) => {
+      console.log(`[Worker ${process.pid}] Semantic: ${req.method} ${req.originalUrl} -> ${VIDEO_INGESTION_URL}${proxyReq.path}`);
+    },
+    onProxyRes: (proxyRes, req) => {
+      console.log(`[Worker ${process.pid}] Semantic <- ${proxyRes.statusCode} ${req.originalUrl}`);
+    }
+  }));
 
   app.use('/video', createProxyMiddleware({
     ...proxyOptions,

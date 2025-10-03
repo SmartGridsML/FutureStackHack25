@@ -4,14 +4,19 @@ services:
     ports:
       - "6379:6379"
 
+  qdrant:
+    image: qdrant/qdrant:v1.12.3
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   api-gateway:
     build: ./services/api-gateway
     ports:
       - "3000:3000"
     environment:
-      - VIDEO_INGESTION_URL=http://video-ingestion:3001
-      - VIDEO_PROCESSING_URL=http://video-processing:5000
-      - LANGUAGE_MODEL_URL=http://language-model:5001
+      - .env  
     depends_on:
       - video-ingestion
       - video-processing
@@ -32,6 +37,7 @@ services:
       - video-processing
       - language-model
       - redis
+      - data-store
     volumes:
       - ./services/video-ingestion:/app
       - /app/node_modules
@@ -67,8 +73,24 @@ services:
       - ./frontend:/app
       - /app/node_modules
 
+  data-store:
+    build: ./services/data-store
+    ports:
+      - "4005:4005"
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY} 
+    depends_on:
+      - qdrant
+    volumes:
+      - ./services/data-store:/app
+      - /app/node_modules
+
 networks:
   default:
     name: frameforge_network
+
+volumes:
+  qdrant_data:
 
 
