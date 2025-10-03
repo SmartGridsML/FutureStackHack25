@@ -52,6 +52,10 @@ app.post('/upload', upload.single('video'), async (req, res) => {
             await indexScenes(videoId, analysisResult.scenes);
         }
 
+        if (transcriptResult.transcript && Array.isArray(transcriptResult.transcript.segments)) {
+            await indexTranscript(videoId, transcriptResult.transcript.segments);
+        }
+
         analysisResult.videoId = videoId;
 
         res.json({
@@ -112,6 +116,27 @@ async function transcribeAudio(videoPath) {
     }
 
     return response.json();
+}
+
+async function indexTranscript(videoId, segments) {
+    const pipeline = redis.pipeline();
+    pipeline.hset(`video:status:${videoId}`, { totalSentences: segments.length, indexedSentences: 0 });
+
+    segments.forEach((segment, index) => {
+        const { text, start, end } = segment;
+        const sentenceKey = `transcript:${videoId}:${index}`;
+        pipeline.hset(sentenceKey, {
+            videoId,
+            text,
+            start,
+            end
+        });
+        pipeline.rpush(`transcript:list:${videoId}`, index);
+        pipeline.hincrby(`video:status:${videoId}`, 'indexedSentences', 1);
+    });
+
+    await pipeline.exec();
+    console.log(`[transcript-index] video=${videoId} sentences=${segments.length}`);
 }
 
 
@@ -221,7 +246,10 @@ app.get('/video/:id/status', async (req, res) => {
         videoId: vid,
         totalFrames: parseInt(status.totalFrames || 0),
         indexedFrames: parseInt(status.indexedFrames || 0),
-        progress: status.totalFrames ? (parseInt(status.indexedFrames || 0) / parseInt(status.totalFrames || 1)) : 0
+        progress: status.totalFrames ? (parseInt(status.indexedFrames || 0) / parseInt(status.totalFrames || 1)) : 0,
+        totalSentences: parseInt(status.totalSentences || 0),
+        indexedSentences: parseInt(status.indexedSentences || 0),
+        transcriptProgress: status.totalSentences ? (parseInt(status.indexedSentences || 0) / parseInt(status.totalSentences || 1)) : 0
     });
 });
 
