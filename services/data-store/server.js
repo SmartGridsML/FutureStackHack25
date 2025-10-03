@@ -134,39 +134,36 @@ async function upsertFrameVectors(videoId, frames) {
   
   console.log(`Upserted ${points.length} vectors for video ${videoId} (embedding_version: ${genAI ? 2 : 1})`);
 }
-
-// Semantic search in Qdrant
+// FIX: Updated to return the full payload from Qdrant
 async function semanticSearch(videoId, queryEmbedding, k = 10) {
-  const res = await fetch(`${QDRANT_URL}/collections/${COLLECTION}/points/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      vector: queryEmbedding,
-      limit: k,
-      with_payload: true,
-      filter: {
-        must: [
-          { key: 'videoId', match: { value: videoId } }
-        ]
-      }
-    })
-  });
+    const res = await fetch(`${QDRANT_URL}/collections/${COLLECTION}/points/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            vector: queryEmbedding,
+            limit: k,
+            with_payload: true,
+            filter: {
+                must: [
+                    { key: 'videoId', match: { value: videoId } }
+                ]
+            }
+        })
+    });
 
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Semantic search failed: ${res.status} ${errorText}`);
-  }
+    if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Semantic search failed: ${res.status} ${errorText}`);
+    }
 
-  const data = await res.json();
-  return data.result.map(point => ({
-    id: point.payload.frame_key || point.id,
-    score: point.score,
-    videoId: point.payload.videoId,
-    timestamp: point.payload.timestamp,
-    description: point.payload.description,
-    embedding_version: point.payload.embedding_version || 1
-  }));
+    const data = await res.json();
+    return data.result.map(point => ({
+        id: point.id,
+        score: point.score,
+        ...point.payload
+    }));
 }
+
 
 // API Endpoints
 app.post('/embeddings/batch', async (req, res) => {
