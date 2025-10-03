@@ -7,9 +7,11 @@ const http = require('http');
 const { randomUUID } = require('crypto');   // <-- add
 const VIDEO_PROCESSING_URL = process.env.VIDEO_PROCESSING_URL || 'http://localhost:5000';
 const LANGUAGE_MODEL_URL = process.env.LANGUAGE_MODEL_URL || 'http://localhost:5001';
+const DATA_STORE_URL = process.env.DATA_STORE_URL || 'http://data-store:4005';
 const app = express();
 const PORT = 3001;
 const Redis = require('ioredis');
+const fetch = require('node-fetch');
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 app.use(cors());
@@ -132,9 +134,56 @@ async function indexScenes(videoId, scenes) {
 
     await pipeline.exec();
     console.log(`[index] video=${videoId} frames=${scenes.length}`);
+
+    // Send to data-store for semantic indexing
+    try {
+        const response = await fetch(`${DATA_STORE_URL}/embeddings/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                videoId,
+                frames: scenes.map(scene => ({
+                    timestamp: typeof scene.timestamp === 'string' 
+                        ? parseInt(scene.timestamp) || parseInt(scene.timestamp.replace(/\D/g,''),10)
+                        : scene.timestamp,
+                    description: scene.description
+                }))
+            })
+        });
+
+        if (response.ok) {
+            console.log(`[semantic-index] video=${videoId} processed`);
+        } else {
+            console.error(`[semantic-index] failed for video=${videoId}: ${response.status}`);
+        }
+    } catch (error) {
+        console.error(`[semantic-index] error for video=${videoId}:`, error.message);
+    }
 }
 
-app.use('/videos', express.static(path.join(__dirname, 'uploads')));
+// Add semantic search endpoint
+app.get('/semantic-search', async (req, res) => {
+    const { videoId, q, k } = req.query;
+    if (!videoId || !q) {
+        return res.status(400).json({ error: 'videoId and q required' });
+    }
+
+    try {
+        const response = await fetch(
+            `${DATA_STORE_URL}/search/semantic?videoId=${encodeURIComponent(videoId)}&q=${encodeURIComponent(q)}&k=${k || 10}`
+        );
+
+        if (!response.ok) {
+            throw new Error(`Data-store responded with ${response.status}`);
+        }
+
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Semantic search proxy error:', error);
+        res.status(500).json({ error: 'Semantic search failed' });
+    }
+});
 
 
 // Status endpoint
