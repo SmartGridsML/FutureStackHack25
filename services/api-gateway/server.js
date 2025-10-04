@@ -60,10 +60,49 @@ if (cluster.isPrimary) {
     timeout: 120000,
   };
 
+    app.use('/upload', createProxyMiddleware({
+    target: VIDEO_INGESTION_URL,
+    changeOrigin: true,
+    onProxyReq: (proxyReq, req) => {
+      console.log(`[Worker ${process.pid}] 🎬 Upload: ${req.method} ${req.url} -> ${VIDEO_INGESTION_URL}`);
+    },
+    onError: (err, req, res) => {
+      console.error(`[Worker ${process.pid}] Upload proxy error:`, err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Upload service unavailable' });
+    }
+  }));
+
+  // Also add video files serving route
+  app.use('/videos', createProxyMiddleware({
+    target: VIDEO_INGESTION_URL,
+    changeOrigin: true,
+    onProxyReq: (proxyReq, req) => {
+      console.log(`[Worker ${process.pid}] 📹 Videos: ${req.method} ${req.url} -> video-ingestion:3001`);
+    },
+    onError: (err, req, res) => {
+      console.error(`[Worker ${process.pid}] Videos proxy error:`, err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Video files unavailable' });
+    }
+  }));
+
+  // Add analysis route for video processing results
+  app.use('/analysis', createProxyMiddleware({
+    target: VIDEO_INGESTION_URL,
+    changeOrigin: true,
+    onProxyReq: (proxyReq, req) => {
+      console.log(`[Worker ${process.pid}] 📊 Analysis: ${req.method} ${req.url} -> video-ingestion:3001`);
+    },
+    onError: (err, req, res) => {
+      console.error(`[Worker ${process.pid}] Analysis proxy error:`, err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Analysis service unavailable' });
+    }
+  }));
+
   // Main API proxy - for /upload etc.
   app.use('/api', createProxyMiddleware({
-    ...proxyOptions,
-    pathRewrite: { '^/api': '' },
+    target: VIDEO_INGESTION_URL,
+    changeOrigin: true,
+    pathRewrite: { '^/api': '/api' }, // Keep /api prefix to avoid conflicts
     onProxyReq: (proxyReq, req) => {
       console.log(`[Worker ${process.pid}] API: ${req.method} ${req.url} -> ${VIDEO_INGESTION_URL}${proxyReq.path}`);
     },
@@ -104,6 +143,15 @@ if (cluster.isPrimary) {
     onError: (err, req, res) => {
       console.error(`[Worker ${process.pid}] Video error:`, err.message);
       if (!res.headersSent) res.status(502).json({ error: 'Video service unavailable' });
+    }
+  }));
+
+  // AI Assistant routes
+  app.use('/assistant', createProxyMiddleware({
+    target: 'http://ai-assistant:5006',
+    changeOrigin: true,
+    onProxyReq: (proxyReq, req) => {
+      console.log(`Assistant: ${req.method} ${req.url}`);
     }
   }));
 
