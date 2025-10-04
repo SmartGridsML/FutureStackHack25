@@ -94,7 +94,10 @@ if (cluster.isPrimary) {
     target: VIDEO_INGESTION_URL,
     changeOrigin: true,
     onProxyReq: (proxyReq, req) => {
-      console.log(`[Worker ${process.pid}] 📊 Analysis: ${req.method} ${req.url} -> video-ingestion:3001`);
+      // 🔧 FIX: Log the full URL path including videoId
+      console.log(`@@@@@@[Worker ${process.pid}] 📊 Analysis: ${req.method} ${req.originalUrl} -> ${VIDEO_INGESTION_URL}${req.url}`);
+      console.log(`[Worker ${process.pid}] 📊 Analysis VideoId: ${req.params.id || 'NOT_CAPTURED'}`);
+      console.log(`[Worker ${process.pid}] 📊 Analysis Full Path: ${req.path}`);
     },
     onError: (err, req, res) => {
       console.error(`[Worker ${process.pid}] Analysis proxy error:`, err.message);
@@ -143,7 +146,16 @@ if (cluster.isPrimary) {
     target: 'http://ai-assistant:5006',
     changeOrigin: true,
     onProxyReq: (proxyReq, req) => {
-      console.log(`Assistant: ${req.method} ${req.url}`);
+      // Match the logging style of other routes
+      console.log(`[Worker ${process.pid}] 🤖 Assistant: ${req.method} ${req.originalUrl} -> http://ai-assistant:5006${req.url}`);
+    },
+    onProxyRes: (proxyRes, req, res) => {
+      console.log(`[Worker ${process.pid}] 🤖 Assistant Response: ${proxyRes.statusCode} for ${req.originalUrl}`);
+    },
+    onError: (err, req, res) => {
+      console.error(`[Worker ${process.pid}] Assistant proxy error:`, err.message);
+      console.error(`[Worker ${process.pid}] Assistant error for URL:`, req.originalUrl);
+      if (!res.headersSent) res.status(500).json({ error: 'AI Assistant service unavailable' });
     }
   }));
 
@@ -151,7 +163,7 @@ if (cluster.isPrimary) {
   app.use('/api', createProxyMiddleware({
     target: VIDEO_INGESTION_URL,
     changeOrigin: true,
-    pathRewrite: { '^/api': '/api' }, // Keep /api prefix to avoid conflicts
+    pathRewrite: { '^/api': '' }, // Keep /api prefix to avoid conflicts
     onProxyReq: (proxyReq, req) => {
       console.log(`[Worker ${process.pid}] API: ${req.method} ${req.url} -> ${VIDEO_INGESTION_URL}${proxyReq.path}`);
     },

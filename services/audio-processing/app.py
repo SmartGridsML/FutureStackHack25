@@ -18,88 +18,114 @@ def health():
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe_audio():
-    data = request.json or {}
-    video_path = data.get('video_path')
-
-    if not video_path:
-        return jsonify({'error': 'video_path required'}), 400
-    if not os.path.exists(video_path):
-        return jsonify({'error': 'file_not_found', 'path': video_path}), 404
-
     temp_path = None
     try:
+        data = request.json or {}
+        video_path = data.get('video_path')
+        
+        if not video_path:
+            return jsonify({'error': 'video_path required'}), 400
+        if not os.path.exists(video_path):
+            return jsonify({'error': 'file_not_found', 'path': video_path}), 404
+
         # Convert to WAV for Whisper
         audio = AudioSegment.from_file(video_path)
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
             temp_path = temp_file.name
             audio.export(temp_path, format="wav", parameters=["-ar", "16000", "-ac", "1"])
 
-        # Load and transcribe audio with word-level timestamps
+        # Load audio with whisper
         audio_data = whisper.load_audio(temp_path)
-        result = whisper.transcribe(model, audio_data, language="en")
 
-        # `whisper_timestamped` already returns word-level timestamps in result['segments'][i]['words']
+        # 🔧 FIX: Use safer transcription settings to avoid infinite logprob
+        result = whisper.transcribe(
+            model,
+            audio_data,
+            language="en",
+            detect_disfluencies=True,
+            vad=False,  # Disable VAD to avoid Silero issues
+            condition_on_previous_text=False,  # Prevent infinite logprob
+            temperature=0.0,  # Deterministic decoding
+            no_speech_threshold=0.6,
+            logprob_threshold=-1.0,
+            # 🔧 ADD: Additional safety parameters
+            beam_size=1,  # Use greedy decoding for stability
+            best_of=1,    # Don't sample multiple candidates
+            suppress_tokens=[-1],  # Suppress problematic tokens
+            # without_timestamps=False  # Keep timestamps for editing
+        )
+
+        if not result or 'segments' not in result:
+            return jsonify({
+                "error": "transcription_failed",
+                "detail": "No segments returned from transcription"
+            }), 500
+
         segments = []
+
+        # Extract detailed editing data
         filler_words = []
         silence_gaps = []
 
-        for segment in result.get("segments", []):
-            segment_data = {
-                "start": segment["start"],
-                "end": segment["end"],
-                "text": segment["text"].strip(),
-                "confidence": 1.0,  # whisper-timestamped doesn’t return confidence
-                "words": []
-            }
-
-            words = segment.get("words", [])
-            for i, word in enumerate(words):
-                word_text = word["text"].strip()
-                word_data = {
-                    "word": word_text,
-                    "start": word["start"],
-                    "end": word["end"],
-                    "confidence": 1.0
+        # Process segments for filler words and timing
+        if result and 'segments' in result:
+            for segment in result['segments']:
+                segment_data = {
+                    "start": segment["start"],
+                    "end": segment["end"],
+                    "text": segment["text"].strip(),
+                    "confidence": 1.0,  # whisper-timestamped doesn’t return confidence
+                    "words": []
                 }
-                segment_data["words"].append(word_data)
 
-                # Filler detection
-                if word_text.lower() in ["um", "uh", "er", "ah", "like", "you", "know", "so", "well", "actually"]:
-                    filler_words.append({
+                words = segment.get("words", [])
+                for i, word in enumerate(words):
+                    word_text = word["text"].strip()
+                    word_data = {
                         "word": word_text,
                         "start": word["start"],
                         "end": word["end"],
-                        "type": "filler"
-                    })
+                        "confidence": 1.0
+                    }
+                    segment_data["words"].append(word_data)
 
-                # Detect word-level silence
-                if i < len(words) - 1:
-                    next_word = words[i + 1]
-                    gap = next_word["start"] - word["end"]
-                    if gap > 1.0:
-                        silence_gaps.append({
-                            "start": word["end"],
-                            "end": next_word["start"],
-                            "duration": gap,
-                            "type": "word_gap",
-                            "context": f"After '{word_text}' before '{next_word['text']}'"
+                    # Filler detection
+                    if word_text.lower() in ["um", "uh", "er", "ah", "like", "you", "know", "so", "well", "actually"]:
+                        filler_words.append({
+                            "word": word_text,
+                            "start": word["start"],
+                            "end": word["end"],
+                            "type": "filler"
                         })
 
-            segments.append(segment_data)
+                    # Detect word-level silence
+                    if i < len(words) - 1:
+                        next_word = words[i + 1]
+                        gap = next_word["start"] - word["end"]
+                        if gap > 1.0:
+                            silence_gaps.append({
+                                "start": word["end"],
+                                "end": next_word["start"],
+                                "duration": gap,
+                                "type": "word_gap",
+                                "context": f"After '{word_text}' before '{next_word['text']}'"
+                            })
 
-        # Inter-segment silence
-        for i in range(len(segments) - 1):
-            current_end = segments[i]["end"]
-            next_start = segments[i + 1]["start"]
-            gap = next_start - current_end
-            if gap > 2.0:
-                silence_gaps.append({
-                    "start": current_end,
-                    "end": next_start,
-                    "duration": gap,
-                    "type": "long_pause",
-                    "context": f"Between segments {i} and {i+1}"
-                })
+                segments.append(segment_data)
+
+            # Inter-segment silence
+            for i in range(len(segments) - 1):
+                current_end = segments[i]["end"]
+                next_start = segments[i + 1]["start"]
+                gap = next_start - current_end
+                if gap > 2.0:
+                    silence_gaps.append({
+                        "start": current_end,
+                        "end": next_start,
+                        "duration": gap,
+                        "type": "long_pause",
+                        "context": f"Between segments {i} and {i+1}"
+                    })
 
         total_filler_time = sum(f["end"] - f["start"] for f in filler_words)
         total_silence_time = sum(g["duration"] for g in silence_gaps)
@@ -166,10 +192,14 @@ def transcribe_audio():
         })
 
     except Exception as e:
-        return jsonify({"error": "transcription_failed", "detail": str(e)}), 500
+        print(f"Transcription error: {str(e)}")
+        return jsonify({
+            "error": "transcription_failed",
+            "detail": str(e)
+        }), 500
     finally:
         if temp_path and os.path.exists(temp_path):
-            os.unlink(temp_path)
+            os.remove(temp_path)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=6000)

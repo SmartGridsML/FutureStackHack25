@@ -16,40 +16,69 @@ function AIAssistant({ videoId, videoContext }) {
     const inputRef = useRef(null);
 
     useEffect(() => {
-        if (videoId) {
+        if (videoId && videoContext) {
+            console.log('🔍 Initializing assistant with:', { videoId, videoContext });
             initializeAssistant();
         }
-    }, [videoId]);
+    }, [videoId, videoContext]); // Add videoContext as dependency
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
     const initializeAssistant = async () => {
-        setIsLoading(prev => ({ ...prev, initializing: true }));
         try {
-            const response = await axios.post(`${import.meta.env.VITE_API_BASE}/assistant/start/${videoId}`);
+            setIsLoading(prev => ({ ...prev, initializing: true }));
             
-            const welcomeMessage = {
-                role: 'assistant',
+            const response = await axios.post(
+                `${import.meta.env.VITE_API_BASE}/assistant/start/${videoId}`,
+                videoContext || {}
+            );
+            
+            setMessages([{
+                id: 'welcome',
+                sender: 'assistant',
                 content: response.data.message,
-                timestamp: new Date(),
-                type: 'welcome'
-            };
+                timestamp: new Date() // 🔧 FIX: Always add timestamp
+            }]);
             
-            setMessages([welcomeMessage]);
             setAssistantReady(true);
+            
         } catch (error) {
             console.error('Failed to initialize assistant:', error);
+            
+            // 🔧 IMPROVEMENT: Better error handling
+            const errorMessage = error.response?.status === 404 
+                ? "🤖 AI Assistant service is temporarily unavailable. You can still use the video editor directly!"
+                : error.response?.data?.message || "I'm ready to help! What would you like to do with your video?";
+            
             setMessages([{
-                role: 'system',
-                content: '❌ Failed to initialize AI assistant. Please ensure your video has been processed and try again.',
-                timestamp: new Date(),
+                id: 'error',
+                sender: 'assistant',
+                content: errorMessage,
+                timestamp: new Date(), // 🔧 FIX: Always add timestamp
                 type: 'error'
             }]);
+            
+            // 🔧 FIX: Set ready to true even on error so user can still interact
+            setAssistantReady(true);
+            
         } finally {
             setIsLoading(prev => ({ ...prev, initializing: false }));
         }
+    };
+
+    // 🔧 FIX: Handle undefined timestamps
+    const formatTimestamp = (timestamp) => {
+        if (!timestamp) return '';
+        
+        // Handle both Date objects and timestamp strings
+        const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+        
+        // Check if date is valid
+        if (isNaN(date.getTime())) return '';
+        
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
     const sendMessage = async () => {
@@ -58,7 +87,7 @@ function AIAssistant({ videoId, videoContext }) {
         const userMessage = {
             role: 'user',
             content: inputMessage.trim(),
-            timestamp: new Date()
+            timestamp: new Date() // 🔧 FIX: Ensure timestamp is always a Date object
         };
 
         setMessages(prev => [...prev, userMessage]);
@@ -73,7 +102,7 @@ function AIAssistant({ videoId, videoContext }) {
             const assistantMessage = {
                 role: 'assistant',
                 content: response.data.response,
-                timestamp: new Date(),
+                timestamp: new Date(), // 🔧 FIX: Ensure timestamp is always a Date object
                 tool_calls: response.data.tool_calls,
                 tool_results: response.data.tool_results,
                 type: response.data.tool_calls ? 'action' : 'response'
@@ -81,7 +110,6 @@ function AIAssistant({ videoId, videoContext }) {
 
             setMessages(prev => [...prev, assistantMessage]);
 
-            // Track editing results
             if (response.data.tool_results) {
                 const newResults = response.data.tool_results.filter(result => 
                     result.output.includes('✅')
@@ -94,7 +122,7 @@ function AIAssistant({ videoId, videoContext }) {
             setMessages(prev => [...prev, {
                 role: 'system',
                 content: '❌ Failed to process your request. Please try again.',
-                timestamp: new Date(),
+                timestamp: new Date(), // 🔧 FIX: Ensure timestamp is always a Date object
                 type: 'error'
             }]);
         } finally {
@@ -112,10 +140,6 @@ function AIAssistant({ videoId, videoContext }) {
     const handleQuickAction = (action) => {
         setInputMessage(action);
         inputRef.current?.focus();
-    };
-
-    const formatTimestamp = (timestamp) => {
-        return timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
     const MessageContent = ({ message }) => {
@@ -181,9 +205,12 @@ function AIAssistant({ videoId, videoContext }) {
                     </div>
                 </div>
                 
-                <div className="text-xs text-gray-500 mt-2 text-right">
-                    {formatTimestamp(message.timestamp)}
-                </div>
+                {/* 🔧 FIX: Only show timestamp if it exists */}
+                {message.timestamp && (
+                    <div className="text-xs text-gray-500 mt-2 text-right">
+                        {formatTimestamp(message.timestamp)}
+                    </div>
+                )}
             </div>
         );
     };

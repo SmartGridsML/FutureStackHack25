@@ -34,48 +34,27 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-app.post('/upload', upload.single('video'), async (req, res) => {
-    if (!req.file) return res.status(400).send('No file uploaded.');
-    const videoId = randomUUID();
-    console.log('File uploaded:', req.file.path);
-
-    const absoluteVideoPath = path.resolve(req.file.path);
-
-    try {
-        const [analysisResult, transcriptResult] = await Promise.all([
-            processVideo(absoluteVideoPath),
-            transcribeAudio(absoluteVideoPath)
-        ]);
-
-        const relativePath = path.basename(req.file.path);
-
-        if (Array.isArray(analysisResult.scenes)) {
-            await indexScenes(videoId, analysisResult.scenes);
-        }
-
-        if (transcriptResult.transcript && Array.isArray(transcriptResult.transcript.segments)) {
-            // console.log('Segments found: ', transcriptResult.transcript.segments)
-            await indexTranscript(videoId, transcriptResult.transcript.segments);
-        }
-        else {
-            console.log('transcribed object not recognised');
-            console.log('transcriptResult: ', transcriptResult.transcript);
-            console.log('transcriptResult.segments: ', transcriptResult.transcript.segments);
-            console.log('Array.isArray(transcriptResult.segments) ', Array.isArray(transcriptResult.transcript.segments));
-        }
-
-        analysisResult.videoId = videoId;
-
-        res.json({
-            videoId,
-            videoPath: relativePath,
-            analysis: analysisResult,
-            transcript: transcriptResult.transcript
-        });
-    } catch (e) {
-        console.error("Error processing video:", e);
-        res.status(502).send("Failed to process video.");
+app.post('/upload', upload.single('video'), (req, res) => { // NOTE: Removed 'async'
+    if (!req.file) {
+        return res.status(400).send('No file uploaded.');
     }
+    
+    const videoId = randomUUID();
+    const absoluteVideoPath = path.resolve(req.file.path);
+    const relativePath = path.basename(req.file.path);
+
+    console.log(`[${videoId}] File uploaded: ${req.file.path}. Starting processing in background.`);
+
+    // Start processing but DO NOT await it.
+    processInBackground(videoId, absoluteVideoPath);
+
+    // Immediately send a response to the client.
+    // Status 202 Accepted indicates the request is being processed.
+    res.status(202).json({
+        videoId,
+        videoPath: relativePath,
+        status: 'processing'
+    });
 });
 
 function processVideo(videoPath) {
@@ -282,7 +261,6 @@ app.get('/semantic-search', async (req, res) => {
     }
 });
 
-
 // Status endpoint
 app.get('/video/:id/status', async (req, res) => {
     const vid = req.params.id;
@@ -333,7 +311,72 @@ app.get('/search', async (req, res) => {
     res.json({ videoId, query: q, tokens, results });
 });
 
+// 🔧 FIX: Add this new endpoint to serve completed analysis data
+app.get('/analysis/:id', async (req, res) => {
+    const videoId = req.params.id;
+    try {
+        // Check the processing status in Redis
+        const status = await redis.hgetall(`video:status:${videoId}`);
+        
+        // If processing is not complete, tell the client to keep polling
+        if (!status.status || status.status !== 'completed') {
+            return res.status(202).json({ status: status.status || 'processing', message: 'Analysis is not yet complete.' });
+        }
 
+        // Fetch all scene descriptions from Redis
+        const frameKeys = await redis.lrange(`frames:list:${videoId}`, 0, -1);
+        const scenePipeline = redis.pipeline();
+        frameKeys.forEach(ts => scenePipeline.hgetall(`frame:${videoId}:${ts}`));
+        const rawScenes = await scenePipeline.exec();
+        const scenes = rawScenes.map(r => r[1]).filter(Boolean);
+
+        // Fetch all transcript segments from Redis
+        const segmentKeys = await redis.lrange(`transcript:list:${videoId}`, 0, -1);
+        const transcriptPipeline = redis.pipeline();
+        segmentKeys.forEach(idx => transcriptPipeline.hgetall(`transcript:${videoId}:${idx}`));
+        const rawSegments = await transcriptPipeline.exec();
+        const segments = rawSegments.map(r => r[1]).filter(Boolean);
+
+        // Return the complete analysis object
+        res.status(200).json({
+            videoId,
+            scenes,
+            transcript: { segments }
+        });
+
+    } catch (error) {
+        console.error(`[${videoId}] Error fetching analysis:`, error);
+        res.status(500).json({ error: 'Failed to retrieve analysis data.' });
+    }
+});
+
+// Also, ensure your background processor sets the 'completed' status
+async function processInBackground(videoId, videoPath) {
+    try {
+        await redis.hset(`video:status:${videoId}`, { status: 'processing' });
+
+        const [analysisResult, transcriptResult] = await Promise.all([
+            processVideo(videoPath),
+            transcribeAudio(videoPath)
+        ]);
+
+        if (Array.isArray(analysisResult.scenes)) {
+            await indexScenes(videoId, analysisResult.scenes);
+        }
+
+        if (transcriptResult.transcript && Array.isArray(transcriptResult.transcript.segments)) {
+            await indexTranscript(videoId, transcriptResult.transcript.segments);
+        }
+        
+        console.log(`[${videoId}] Background processing finished.`);
+        // Set status to 'completed' in Redis when done
+        await redis.hset(`video:status:${videoId}`, { status: 'completed' });
+
+    } catch (e) {
+        console.error(`[${videoId}] Error during background processing:`, e);
+        await redis.hset(`video:status:${videoId}`, { status: 'failed', error: e.message });
+    }
+}
 
 app.listen(PORT, () => {
     console.log(`Video Ingestion Service listening on port ${PORT}`);

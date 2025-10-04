@@ -34,7 +34,7 @@ function App() {
    */
   const pollForAnalysis = async (videoId) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE}/analysis/${videoId}`);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE}/api/analysis/${videoId}`);
 
       if (response.status === 200) { // 200 OK: Analysis is complete
         const analysisData = await response.json();
