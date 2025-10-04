@@ -1,160 +1,181 @@
-import React, { useState, useRef } from 'react';
+import { useState } from 'react';
 import './App.css';
 import Upload from './components/Upload';
+import VideoContext from './components/VideoContext';
+import AIAssistant from './components/AIAssistant';
 import Player from './components/Player';
 
 function App() {
-    const [videoId, setVideoId] = useState('');
-    const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState([]);
-    const [videoUrl, setVideoUrl] = useState('');
-    const [analysisResult, setAnalysisResult] = useState(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [statusText, setStatusText] = useState('');
-    const [searchType, setSearchType] = useState('lexical');
-    const playerRef = useRef(null);
+  const [currentView, setCurrentView] = useState('upload'); // 'upload', 'analysis', 'editor'
+  const [uploadedVideo, setUploadedVideo] = useState(null);
+  const [videoAnalysis, setVideoAnalysis] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-    const handleUploadSuccess = (videoIdReturned, videoPath, analysis) => {
-        setVideoId(videoIdReturned);
-        setVideoUrl(`http://localhost:3001/videos/${videoPath}`);
-        setAnalysisResult(analysis);
-        setIsLoading(false);
-        setStatusText('Analysis Complete!');
-    };
-
-    const handleProcessing = () => {
-        setIsLoading(true);
-        setStatusText('Uploading and processing video... this may take a moment.');
-        setVideoUrl('');
-        setAnalysisResult(null);
-        setSearchResults([]);
-        setVideoId('');
-    };
-
-    const handleSeek = (timestamp) => {
-        const seconds = parseInt(timestamp, 10);
-        if (playerRef.current?.seekTo) {
-            playerRef.current.seekTo(seconds, 'seconds');
-        }
-    };
-
-    // FIX: Updated to handle unified search results
-    async function runSearch() {
-        if (!videoId || !searchQuery) return;
-        
-        const endpoint = searchType === 'semantic' ? 'semantic-search' : 'search';
-        const r = await fetch(
-            `http://localhost:3000/${endpoint}?videoId=${videoId}&q=${encodeURIComponent(searchQuery)}`
-        );
-        const data = await r.json();
-
-        if (searchType === 'semantic') {
-            const sortedResults = (data.results || []).sort((a, b) => (a.timestamp || a.start) - (b.timestamp || b.start));
-            setSearchResults(sortedResults);
-        } else {
-            setSearchResults(data.results || []);
-        }
+  const handleUpload = async (uploadResponse) => {
+    console.log('Upload completed:', uploadResponse);
+    setUploadedVideo(uploadResponse);
+    setIsProcessing(true);
+    
+    try {
+      // Start analysis
+      setCurrentView('analysis');
+      
+      // Fetch video analysis
+      const analysisResponse = await fetch(
+        `${import.meta.env.VITE_API_BASE}/analysis/${uploadResponse.id}`
+      );
+      
+      if (analysisResponse.ok) {
+        const analysis = await analysisResponse.json();
+        setVideoAnalysis(analysis);
+        setCurrentView('editor');
+      } else {
+        console.error('Analysis failed');
+        alert('Video analysis failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Analysis error:', error);
+      alert('Analysis failed. Please try again.');
+    } finally {
+      setIsProcessing(false);
     }
+  };
 
-    return (
-        <div className="container">
-            <header className="app-header">
-                <h1>FrameForge 👁️‍🗨️</h1>
-                <p>Your AI-powered video analysis and summarization tool.</p>
-            </header>
-            <main>
-                <Upload onUploadSuccess={handleUploadSuccess} onProcessing={handleProcessing} />
+  const handleProcessing = (processing) => {
+    setIsProcessing(processing);
+  };
 
-                <div className="card">
-                    <h3>Search Frames</h3>
-                    <div style={{ marginBottom: '10px' }}>
-                        <label>
-                            <input
-                                type="radio"
-                                value="lexical"
-                                checked={searchType === 'lexical'}
-                                onChange={(e) => setSearchType(e.target.value)}
-                            />
-                            Keyword Search
-                        </label>
-                        <label style={{ marginLeft: '20px' }}>
-                            <input
-                                type="radio"
-                                value="semantic"
-                                checked={searchType === 'semantic'}
-                                onChange={(e) => setSearchType(e.target.value)}
-                            />
-                            Semantic Search
-                        </label>
-                    </div>
-                    <input
-                        style={{ width: '70%' }}
-                        placeholder={searchType === 'semantic' ? 
-                            'Search e.g. "explain machine learning concepts"' : 
-                            'Search e.g. "neural network"'
-                        }
-                        value={searchQuery}
-                        onChange={e => setSearchQuery(e.target.value)}
-                    />
-                    <button onClick={runSearch} disabled={!videoId || !searchQuery}>
-                        {searchType === 'semantic' ? 'Semantic Search' : 'Keyword Search'}
-                    </button>
-                    <ul>
-                        {/* FIX: Updated rendering to handle both lexical and semantic results */}
-                        {searchResults.map((r, index) => (
-                            <li key={`${r.type || 'lexical'}-${r.timestamp || r.start}-${index}`} onClick={() => handleSeek(r.timestamp || r.start)}>
-                                <strong>
-                                    {r.timestamp || r.start}s 
-                                    {searchType === 'semantic' ? 
-                                        ` (similarity: ${(r.score * 100).toFixed(1)}%)` : 
-                                        ` (score: ${r.score})`
-                                    }
-                                </strong> — {(r.text || r.description || '').slice(0, 90)}...
-                            </li>
-                        ))}
-                    </ul>
-                </div>
+  const resetToUpload = () => {
+    setCurrentView('upload');
+    setUploadedVideo(null);
+    setVideoAnalysis(null);
+    setIsProcessing(false);
+  };
 
-                {isLoading && (
-                    <div className="card status-card">
-                        <div className="loader"></div>
-                        <p>{statusText}</p>
-                    </div>
-                )}
-
-                {analysisResult && (
-                    <div className="results-grid">
-                        <div className="card summary-card">
-                            <h3>AI Summary</h3>
-                            <p>{analysisResult.summary}</p>
-                        </div>
-                        <div className="card scenes-card">
-                            <h3>Detected Scenes</h3>
-                            <ul>
-                                {analysisResult.scenes.map((scene, index) => (
-                                    <li key={index} onClick={() => handleSeek(scene.timestamp)}>
-                                        <strong>{scene.timestamp}s:</strong> {scene.description}
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    </div>
-                )}
-
-                {videoUrl && (
-                    <Player
-                        videoUrl={videoUrl}
-                        playerRef={playerRef}
-                        analysisData={analysisResult}
-                        onProgress={(progress) => {
-                            // console.log('Video progress:', progress.playedSeconds);
-                        }}
-                        onSeek={handleSeek}
-                    />
-                )}
-            </main>
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg"></div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                FrameForge
+              </h1>
+            </div>
+            
+            <nav className="flex items-center gap-6">
+              <button
+                onClick={resetToUpload}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  currentView === 'upload' 
+                    ? 'bg-blue-100 text-blue-700 font-medium' 
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Upload
+              </button>
+              <button
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  currentView === 'analysis' 
+                    ? 'bg-blue-100 text-blue-700 font-medium' 
+                    : 'text-gray-600 hover:text-gray-900'
+                } ${!uploadedVideo ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={!uploadedVideo}
+              >
+                Analysis
+              </button>
+              <button
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  currentView === 'editor' 
+                    ? 'bg-blue-100 text-blue-700 font-medium' 
+                    : 'text-gray-600 hover:text-gray-900'
+                } ${!videoAnalysis ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={!videoAnalysis}
+              >
+                AI Editor
+              </button>
+            </nav>
+          </div>
         </div>
-    );
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        {currentView === 'upload' && (
+          <Upload 
+            onUpload={handleUpload} 
+            onProcessing={handleProcessing}
+          />
+        )}
+        
+        {currentView === 'analysis' && (
+          <div className="space-y-8">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">
+                Analyzing Your Video
+              </h2>
+              {isProcessing ? (
+                <div className="flex items-center justify-center gap-3">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  <p className="text-gray-600">Processing video content...</p>
+                </div>
+              ) : (
+                <p className="text-gray-600">Analysis complete!</p>
+              )}
+            </div>
+            
+            {videoAnalysis && (
+              <VideoContext 
+                videoId={uploadedVideo?.id}
+                analysis={videoAnalysis}
+              />
+            )}
+          </div>
+        )}
+        
+        {currentView === 'editor' && uploadedVideo && videoAnalysis && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1">
+              <Player 
+                videoUrl={uploadedVideo.url}
+                videoId={uploadedVideo.id}
+              />
+              
+              <div className="mt-6">
+                <VideoContext 
+                  videoId={uploadedVideo.id}
+                  analysis={videoAnalysis}
+                  compact={true}
+                />
+              </div>
+            </div>
+            
+            <div className="lg:col-span-2">
+              <AIAssistant 
+                videoId={uploadedVideo.id}
+                videoContext={videoAnalysis}
+              />
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Loading Overlay */}
+      {isProcessing && currentView === 'upload' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-8 max-w-sm mx-4 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-lg font-medium text-gray-900 mb-2">
+              Processing Video
+            </p>
+            <p className="text-gray-600">
+              Analyzing content and preparing for editing...
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default App;
