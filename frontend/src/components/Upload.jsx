@@ -1,99 +1,71 @@
 import React, { useState, useRef } from 'react';
-import axios from 'axios';
+import axios from 'axios'; // 1. Import axios
 import { Upload as UploadIcon, Video, AlertCircle } from 'lucide-react';
 
 function Upload({ onUpload, onProcessing }) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [selectedFile, setSelectedFile] = useState(null);
   const fileInputRef = useRef(null);
 
   const handleFileSelect = (file) => {
     if (!file) return;
     
-    // Validate file type
     if (!file.type.startsWith('video/')) {
       alert('Please select a valid video file');
-      return;
-    }
-    
-    // Validate file size (100MB limit)
-    if (file.size > 100 * 1024 * 1024) {
-      alert('File size must be less than 100MB');
       return;
     }
 
     handleUpload(file);
   };
 
+  // 2. Refactor handleUpload to use axios
   const handleUpload = async (file) => {
     setIsUploading(true);
     setUploadProgress(0);
     
+    if (typeof onProcessing === 'function') {
+      onProcessing(true);
+    }
+
+    const formData = new FormData();
+    formData.append('video', file);
+
     try {
-      // Call onProcessing callback if provided
-      if (typeof onProcessing === 'function') {
-        onProcessing(true);
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_BASE}/api/upload`, // Ensure this path is correct
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+          onUploadProgress: (progressEvent) => {
+            const progress = (progressEvent.loaded / progressEvent.total) * 100;
+            setUploadProgress(progress);
+          },
+        }
+      );
+
+      // Axios considers any 2xx status as success
+      console.log('Upload successful, server responded:', response.data);
+      
+      // 🔧 FIX: Check for videoId and pass it to the parent component
+      if (response.data && response.data.videoId) {
+        if (typeof onUpload === 'function') {
+          onUpload(response.data); // Pass the whole response object
+        }
+      } else {
+        throw new Error("Server response did not include a videoId.");
       }
 
-      const formData = new FormData();
-      formData.append('video', file);
-
-      const xhr = new XMLHttpRequest();
-      
-      // Track upload progress
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const progress = (event.loaded / event.total) * 100;
-          setUploadProgress(progress);
-        }
-      };
-
-      // Handle completion
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          const response = JSON.parse(xhr.responseText);
-          console.log('Upload successful:', response);
-          
-          if (typeof onUpload === 'function') {
-            onUpload(response);
-          }
-        } else {
-          console.error('Upload failed:', xhr.statusText);
-          alert('Upload failed. Please try again.');
-        }
-        
-        setIsUploading(false);
-        setUploadProgress(0);
-        
-        if (typeof onProcessing === 'function') {
-          onProcessing(false);
-        }
-      };
-
-      // Handle errors
-      xhr.onerror = () => {
-        console.error('Upload error');
-        alert('Upload failed. Please check your connection and try again.');
-        setIsUploading(false);
-        setUploadProgress(0);
-        
-        if (typeof onProcessing === 'function') {
-          onProcessing(false);
-        }
-      };
-
-      // Start upload
-      xhr.open('POST', `${import.meta.env.VITE_API_BASE}/upload`);
-      xhr.send(formData);
-
     } catch (error) {
-      console.error('Upload error:', error);
+      // Axios automatically handles non-2xx responses as errors
+      console.error('Upload error:', error.response ? error.response.data : error.message);
       alert('Upload failed. Please try again.');
+    } finally {
+      // This will run after success or failure
       setIsUploading(false);
       setUploadProgress(0);
-      
       if (typeof onProcessing === 'function') {
         onProcessing(false);
       }

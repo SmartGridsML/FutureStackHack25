@@ -15,7 +15,7 @@ services:
     build: ./services/api-gateway
     ports:
       - "3000:3000"
-    environment:
+    env_file:
       - .env  
     depends_on:
       - video-ingestion
@@ -34,7 +34,7 @@ services:
       - VIDEO_PROCESSING_URL=http://video-processing:5000
       - LANGUAGE_MODEL_URL=http://language-model:5001
       - REDIS_URL=redis://redis:6379
-      - AUDIO_PROCESSING_URL=http://audio-processing:5004
+      - AUDIO_PROCESSING_URL=http://audio-processing:6000
       - DATA_STORE_URL=http://data-store:4005
       - MCP_VIDEO_EDITOR_URL=http://mcp-video-editor:5007
     depends_on:
@@ -46,7 +46,7 @@ services:
     volumes:
       - ./services/video-ingestion:/app
       - /app/node_modules
-      - ./services/video-ingestion/uploads:/app/uploads
+      - ./uploads:/app/uploads 
 
   video-processing:
     build: ./services/video-processing
@@ -57,7 +57,7 @@ services:
     depends_on:
       - redis
     volumes:
-      - ./services/video-ingestion/uploads:/app/uploads
+      - ./uploads:/app/uploads 
 
   language-model:
     build: ./services/language-model
@@ -94,18 +94,18 @@ services:
   audio-processing:
     build: ./services/audio-processing
     ports:
-      - "5004:5004"
+      - "6000:6000"
     depends_on:
       - redis
     volumes:
-      - ./services/video-ingestion/uploads:/app/uploads
+      - ./uploads:/app/uploads 
 
   mcp-video-editor:
     build: ./services/mcp-video-editor
     ports:
       - "5007:5007"
     volumes:
-      - ./services/video-ingestion/uploads:/app/uploads
+      - ./uploads:/app/uploads 
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
@@ -120,7 +120,7 @@ services:
     depends_on:
       - mcp-video-editor
     volumes:
-      - ./services/video-ingestion/uploads:/app/uploads
+      - ./uploads:/app/uploads
 
 networks:
   default:

@@ -2,3 +2,4 @@ Flask==2.1.2
 pydub==0.25.1
 whisper-timestamped
 Werkzeug==2.3.8
+torch
