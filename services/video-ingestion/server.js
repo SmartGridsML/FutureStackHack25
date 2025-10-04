@@ -8,6 +8,8 @@ const { randomUUID } = require('crypto');
 const VIDEO_PROCESSING_URL = process.env.VIDEO_PROCESSING_URL || 'http://localhost:5000';
 const LANGUAGE_MODEL_URL = process.env.LANGUAGE_MODEL_URL || 'http://localhost:5001';
 const DATA_STORE_URL = process.env.DATA_STORE_URL || 'http://data-store:4005';
+const AUDIO_PROCESSING_URL = process.env.AUDIO_PROCESSING_URL || 'http://localhost:6000';
+
 const app = express();
 const PORT = 3001;
 const Redis = require('ioredis');
