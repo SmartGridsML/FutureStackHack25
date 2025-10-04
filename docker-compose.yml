@@ -35,6 +35,8 @@ services:
       - LANGUAGE_MODEL_URL=http://language-model:5001
       - REDIS_URL=redis://redis:6379
       - AUDIO_PROCESSING_URL=http://audio-processing:5004
+      - DATA_STORE_URL=http://data-store:4005
+      - MCP_VIDEO_EDITOR_URL=http://mcp-video-editor:5007
     depends_on:
       - video-processing
       - language-model
@@ -95,6 +97,28 @@ services:
       - "5004:5004"
     depends_on:
       - redis
+    volumes:
+      - ./services/video-ingestion/uploads:/app/uploads
+
+  mcp-video-editor:
+    build: ./services/mcp-video-editor
+    ports:
+      - "5007:5007"
+    volumes:
+      - ./services/video-ingestion/uploads:/app/uploads
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  ai-assistant:
+    build: ./services/ai-assistant
+    ports:
+      - "5006:5006"
+    environment:
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - MCP_VIDEO_EDITOR_URL=http://mcp-video-editor:5007
+    depends_on:
+      - mcp-video-editor
     volumes:
       - ./services/video-ingestion/uploads:/app/uploads
 
