@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
-const MCP_VIDEO_EDITOR_URL = process.env.MCP_VIDEO_EDITOR_URL || 'http://mcp-video-editor:5007';
+const MCP_VIDEO_EDITOR_URL = 'http://mcp-video-editor:5007';
 
 // Initialize Cerebras client
 const client = new Cerebras({
@@ -140,7 +140,7 @@ When the user requests video editing, use the appropriate tools and provide help
         try {
             // Use Llama 3.1-70B via Cerebras
             const response = await client.chat.completions.create({
-                model: 'llama3.1-70b',
+                model: 'llama-4-maverick-17b-128e-instruct',
                 messages,
                 tools,
                 tool_choice: 'auto',
@@ -230,17 +230,18 @@ When the user requests video editing, use the appropriate tools and provide help
                 args = {};
             }
             
-            // Add video context data and default paths
-            const baseVideoPath = `/app/uploads/${videoId}.mp4`;
-            
+            // Add video context data and ALWAYS set correct paths (ignore AI-provided paths)
+            const filename = videoContext.filename || `${videoId}.mp4`; // 🔧 FIX: Use actual filename from videoContext
+            const baseVideoPath = `/app/uploads/${filename}`;
+        
             if (toolCall.function.name === 'remove_filler_words') {
                 args.filler_segments = videoContext.filler_words || [];
-                args.video_path = args.video_path || baseVideoPath;
-                args.output_path = args.output_path || `/app/uploads/${videoId}_no_fillers.mp4`;
+                args.video_path = baseVideoPath; // Always use correct path
+                args.output_path = `/app/uploads/${videoId}_no_fillers.mp4`;
             } else if (toolCall.function.name === 'trim_silence') {
                 args.silence_segments = videoContext.silence_gaps || [];
-                args.video_path = args.video_path || baseVideoPath;
-                args.output_path = args.output_path || `/app/uploads/${videoId}_trimmed.mp4`;
+                args.video_path = baseVideoPath;
+                args.output_path = `/app/uploads/${videoId}_trimmed.mp4`;
                 args.min_silence_duration = args.min_silence_duration || 1.5;
             } else if (toolCall.function.name === 'create_highlight_reel') {
                 args.highlights = videoContext.scenes?.slice(0, 5).map((scene, i) => ({
@@ -254,11 +255,11 @@ When the user requests video editing, use the appropriate tools and provide help
                     { start: 60, end: 70, description: "Conclusion", engagement_score: 0.7 }
                 ];
                 args.target_duration = args.target_duration || 60;
-                args.video_path = args.video_path || baseVideoPath;
-                args.output_path = args.output_path || `/app/uploads/${videoId}_highlights.mp4`;
+                args.video_path = baseVideoPath;
+                args.output_path = `/app/uploads/${videoId}_highlights.mp4`;
             } else if (toolCall.function.name === 'enhance_audio') {
-                args.video_path = args.video_path || baseVideoPath;
-                args.output_path = args.output_path || `/app/uploads/${videoId}_enhanced.mp4`;
+                args.video_path = baseVideoPath;
+                args.output_path = `/app/uploads/${videoId}_enhanced.mp4`;
                 args.normalize_audio = args.normalize_audio !== false;
                 args.reduce_noise = args.reduce_noise !== false;
             }
@@ -305,7 +306,7 @@ const assistant = new VideoEditingAssistant();
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'AI Assistant Ready', 
-        model: 'llama3.1-70b via Cerebras',
+        model: 'llama-4-maverick-17b-128e-instruct via Cerebras', 
         cerebras_configured: !!CEREBRAS_API_KEY,
         mcp_endpoint: MCP_VIDEO_EDITOR_URL
     });
@@ -362,7 +363,7 @@ app.post('/assistant/chat/:videoId', async (req, res) => {
 
 const PORT = process.env.PORT || 5006;
 app.listen(PORT, () => {
-    console.log(`🤖 AI Assistant (Cerebras + Llama 3.1-70B) running on port ${PORT}`);
+    console.log(`🤖 AI Assistant (Cerebras +  Llama 4 Maverick) running on port ${PORT}`);
     console.log(`🔗 MCP Video Editor URL: ${MCP_VIDEO_EDITOR_URL}`);
     console.log(`🧠 Cerebras API Key: ${CEREBRAS_API_KEY ? '✅ Configured' : '❌ Missing'}`);
 });

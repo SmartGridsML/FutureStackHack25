@@ -19,43 +19,50 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 app.use(cors());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Update Multer storage to use videoId
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        const dir = 'uploads/';
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir);
-        }
-        cb(null, dir);
-    },
-    filename: function (req, file, cb) {
-        cb(null, Date.now() + path.extname(file.originalname));
-    }
+  destination: (req, file, cb) => {
+    cb(null, '/app/uploads'); // Ensure this matches the mounted volume
+  },
+  filename: (req, file, cb) => {
+    // Generate or use provided videoId
+    const videoId = req.body.videoId || generateVideoId(); // Implement generateVideoId if needed
+    cb(null, `${videoId}.mp4`);
+  }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({ storage });
 
 app.post('/upload', upload.single('video'), (req, res) => { // NOTE: Removed 'async'
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
     }
-    
-    const videoId = randomUUID();
-    const absoluteVideoPath = path.resolve(req.file.path);
-    const relativePath = path.basename(req.file.path);
 
-    console.log(`[${videoId}] File uploaded: ${req.file.path}. Starting processing in background.`);
+    const videoId = req.body.videoId || generateVideoId(); // Extract videoId from filename
+    const filePath = `/app/uploads/${req.file.filename}`;
+    
+    console.log(`📁 Video uploaded: ${filePath}`);
 
     // Start processing but DO NOT await it.
-    processInBackground(videoId, absoluteVideoPath);
+    processInBackground(videoId, filePath);
 
     // Immediately send a response to the client.
     // Status 202 Accepted indicates the request is being processed.
     res.status(202).json({
         videoId,
-        videoPath: relativePath,
-        status: 'processing'
+        videoPath: req.file.filename,
+        status: 'Video uploaded successfully'
     });
 });
+
+// Helper function to generate UUID if not provided
+function generateVideoId() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 
 function processVideo(videoPath) {
     return new Promise((resolve, reject) => {
@@ -166,14 +173,14 @@ async function indexTranscript(videoId, segments) {
 
 
 // Serve the video file
-// app.get('/videos/:filename', (req, res) => {
-//     const filePath = path.join(__dirname, 'uploads', req.params.filename);
-//      if (fs.existsSync(filePath)) {
-//         res.sendFile(filePath);
-//     } else {
-//         res.status(404).send('File not found.');
-//     }
-// });
+app.get('/videos/:filename', (req, res) => {
+    const filePath = path.join(__dirname, 'uploads', req.params.filename);
+     if (fs.existsSync(filePath)) {
+        res.sendFile(filePath);
+    } else {
+        res.status(404).send('File not found.');
+    }
+});
 
 function tokenize(text) {
     if (!text) return [];

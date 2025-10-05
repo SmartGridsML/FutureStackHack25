@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 import threading
 
 from mcp.server import Server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, CallToolRequest  # 🔧 Add CallToolRequest import
 from flask import Flask, request, jsonify
 
 # MCP Server
@@ -249,8 +249,14 @@ async def trim_silence(video_path: str, output_path: str, silence_segments: List
         return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
 
 async def create_highlight_reel(video_path: str, output_path: str, highlights: List[Dict], target_duration: float, fade_duration: float = 0.5) -> List[TextContent]:
-    """Create highlight reel from top scoring segments"""
     try:
+        print(f"Video path: {video_path}")
+        print(f"File exists: {os.path.exists(video_path)}")
+        if os.path.exists(video_path):
+            print(f"File size: {os.path.getsize(video_path)}")
+        
+        print(f"Highlights: {highlights}")
+        
         sorted_highlights = sorted(highlights, key=lambda x: x.get('engagement_score', 0), reverse=True)
         
         selected_clips = []
@@ -264,6 +270,8 @@ async def create_highlight_reel(video_path: str, output_path: str, highlights: L
                 
                 if current_duration >= target_duration * 0.95:
                     break
+        
+        print(f"Selected clips: {selected_clips}")
         
         if not selected_clips:
             return [TextContent(type="text", text="No highlights found that fit the target duration")]
@@ -282,6 +290,8 @@ async def create_highlight_reel(video_path: str, output_path: str, highlights: L
                 '-y', temp_clip
             ]
             
+            print(f"Extract command for clip {i}: {' '.join(cmd)}")
+            
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 return [TextContent(type="text", text=f"Failed to extract clip {i}: {result.stderr}")]
@@ -295,6 +305,8 @@ async def create_highlight_reel(video_path: str, output_path: str, highlights: L
             'ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_file,
             '-c', 'copy', '-y', output_path
         ]
+        
+        print(f"Concat command: {' '.join(cmd)}")
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
@@ -387,7 +399,8 @@ def execute_tool():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        result = loop.run_until_complete(server.call_tool(tool_name, arguments))
+        # Call the actual call_tool function directly, not through the server decorator
+        result = loop.run_until_complete(call_tool(tool_name, arguments))
         return jsonify({
             "success": True,
             "result": [content.text if hasattr(content, 'text') else str(content) for content in result]
@@ -399,6 +412,7 @@ def execute_tool():
         }), 500
     finally:
         loop.close()
+
 
 if __name__ == "__main__":
     print("🎬 MCP Video Editor starting (HTTP-only mode)...")

@@ -46,7 +46,7 @@ services:
     volumes:
       - ./services/video-ingestion:/app
       - /app/node_modules
-      - ./uploads:/app/uploads 
+      - ./uploads:/app/uploads
 
   video-processing:
     build: ./services/video-processing
@@ -98,14 +98,16 @@ services:
     depends_on:
       - redis
     volumes:
-      - ./uploads:/app/uploads 
+      - ./services/audio-processing:/app
+      - ./uploads:/app/uploads
 
   mcp-video-editor:
     build: ./services/mcp-video-editor
     ports:
       - "5007:5007"
     volumes:
-      - ./uploads:/app/uploads 
+      - ./services/mcp-video-editor:/app
+      - ./uploads:/app/uploads
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
@@ -120,6 +122,7 @@ services:
     depends_on:
       - mcp-video-editor
     volumes:
+      - ./services/ai-assistant:/app
       - ./uploads:/app/uploads
 
 networks:

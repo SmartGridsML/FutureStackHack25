@@ -140,11 +140,15 @@ if (cluster.isPrimary) {
       if (!res.headersSent) res.status(502).json({ error: 'Video service unavailable' });
     }
   }));
-
+  app.use('/videos', createProxyMiddleware({
+    target: 'http://video-ingestion:3001',
+    changeOrigin: true,
+  }));
   // AI Assistant routes
-  app.use('/assistant', createProxyMiddleware({
+  app.use('/api/assistant', createProxyMiddleware({
     target: 'http://ai-assistant:5006',
     changeOrigin: true,
+    pathRewrite: (path, req) => '/assistant' + path, // 🔧 ADD: Strip /api prefix
     onProxyReq: (proxyReq, req) => {
       // Match the logging style of other routes
       console.log(`[Worker ${process.pid}] 🤖 Assistant: ${req.method} ${req.originalUrl} -> http://ai-assistant:5006${req.url}`);
@@ -158,6 +162,13 @@ if (cluster.isPrimary) {
       if (!res.headersSent) res.status(500).json({ error: 'AI Assistant service unavailable' });
     }
   }));
+
+
+  app.use('/api/video-ingestion', createProxyMiddleware({
+  target: 'http://video-ingestion:3001',
+  changeOrigin: true,
+  pathRewrite: { '^/api/video-ingestion': '' },
+}));
 
   // Main API proxy - for /upload etc.
   app.use('/api', createProxyMiddleware({

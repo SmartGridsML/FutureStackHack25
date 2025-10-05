@@ -26,7 +26,7 @@ function VideoContext({ videoId, analysisResult }) {
                 editing_suggestions: analysisResult.editing_suggestions || []
             };
 
-            await axios.post(`${import.meta.env.VITE_API_BASE}/context/store`, contextPayload);
+            await axios.post(`${import.meta.env.VITE_API_BASE}/api/context/store`, contextPayload);
             setContextData(contextPayload);
         } catch (error) {
             console.error('Failed to store video context:', error);
