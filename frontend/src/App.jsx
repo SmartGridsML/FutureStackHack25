@@ -21,6 +21,7 @@ function App() {
     }
     setVideo(uploadResponse);
     setIsProcessing(true);
+    console.log('Upload response:', uploadResponse.videoId);
     pollForAnalysis(uploadResponse.videoId);
   };
 
@@ -47,11 +48,11 @@ function App() {
     // This logic assumes your backend produces predictable filenames
     // You might need to adjust this based on the actual toolResult structure
     if (toolResult.output?.includes('highlights.mp4')) {
-      setEditedVideoUrl(`${import.meta.env.VITE_API_BASE}/videos/${video.videoId}_highlights.mp4?t=${new Date().getTime()}`);
+      setEditedVideoUrl(`${import.meta.env.VITE_API_BASE}/uploads/${video.videoId}_highlights.mp4?t=${new Date().getTime()}`);
     } else if (toolResult.output?.includes('trimmed.mp4')) {
-      setEditedVideoUrl(`${import.meta.env.VITE_API_BASE}/videos/${video.videoId}_trimmed.mp4?t=${new Date().getTime()}`);
+      setEditedVideoUrl(`${import.meta.env.VITE_API_BASE}/uploads/${video.videoId}_trimmed.mp4?t=${new Date().getTime()}`);
     } else if (toolResult.output?.includes('enhanced.mp4')) {
-      setEditedVideoUrl(`${import.meta.env.VITE_API_BASE}/videos/${video.videoId}_enhanced.mp4?t=${new Date().getTime()}`);
+      setEditedVideoUrl(`${import.meta.env.VITE_API_BASE}/uploads/${video.videoId}_enhanced.mp4?t=${new Date().getTime()}`);
     }
   };
 
@@ -93,10 +94,18 @@ function App() {
                 <div className="flex flex-col">
                   <h2 className="text-lg font-semibold mb-3 text-[hsl(var(--muted-foreground))]">Original</h2>
                   <div className="aspect-video bg-black rounded-lg overflow-hidden">
-                    <Player 
+                    {/* <Player 
                       playerRef={playerRef} 
-                      videoUrl={`${import.meta.env.VITE_API_BASE}/videos/${video.videoPath}`} 
-                    />
+                      videoUrl={`${import.meta.env.VITE_API_BASE}/uploads/${video.videoPath}`} 
+                    /> */}
+                    {video && (
+                      <video
+                        ref={playerRef}
+                        src={`${import.meta.env.VITE_API_BASE}/uploads/${video.videoPath}`}
+                        controls
+                        className="w-full h-full object-contain bg-black"
+                      />
+                    )}
                   </div>
                 </div>
                 {/* Edited Video Player */}
@@ -104,7 +113,12 @@ function App() {
                   <h2 className="text-lg font-semibold mb-3 text-[hsl(var(--muted-foreground))]">AI Edited Version</h2>
                   <div className="aspect-video bg-black rounded-lg overflow-hidden">
                     {editedVideoUrl ? (
-                      <Player playerRef={editedPlayerRef} videoUrl={editedVideoUrl} />
+                      <video
+                        ref={editedPlayerRef}
+                        src={editedVideoUrl}
+                        controls
+                        className="w-full h-full object-contain bg-black"
+                      />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center bg-[hsl(var(--secondary))] text-[hsl(var(--muted-foreground))]">
                         <Film className="w-10 h-10 mb-2" />

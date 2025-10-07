@@ -23,10 +23,21 @@ function AIAssistant({ videoId, videoContext, onToolComplete }) {
     }, [messages]);
 
     const initializeAssistant = async () => {
-        setMessages([{
-            role: 'assistant',
-            content: "I'm ready to help! What would you like to do with your video? You can ask me to `Remove all filler words` or `Create a 60-second highlight reel`."
-        }]);
+        try {
+            const response = await axios.post(
+                `${import.meta.env.VITE_API_BASE}/api/assistant/start/${videoId}`,
+                videoContext
+            );
+            setMessages([{
+                role: 'assistant',
+                content: response.data.message
+            }]);
+        } catch (error) {
+            setMessages([{
+                role: 'assistant',
+                content: "I'm ready to help! What would you like to do with your video? You can ask me to `Remove all filler words` or `Create a 60-second highlight reel`."
+            }]);
+        }
     };
     
     const sendMessage = async () => {

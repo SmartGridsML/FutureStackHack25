@@ -144,7 +144,8 @@ When the user requests video editing, use the appropriate tools and provide help
                 messages,
                 tools,
                 tool_choice: 'auto',
-                temperature: 0.7,
+                // temperature: 0.7,
+                temperature: 0.1,
                 max_tokens: 1024
             });
 

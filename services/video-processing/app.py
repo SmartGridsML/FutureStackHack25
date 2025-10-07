@@ -115,6 +115,7 @@ def analyze_frame(image_path):
 def process_video():
     data = request.json
     video_path = data['video_path']
+    print(f"Received video for processing: {video_path}", flush=True)
     video_filename = os.path.basename(video_path)
     output_dir = f"temp_frames_{int(os.path.getmtime(video_path))}"
     

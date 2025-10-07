@@ -33,26 +33,34 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-app.post('/upload', upload.single('video'), (req, res) => { // NOTE: Removed 'async'
+app.post('/upload', upload.single('video'), async (req, res) => { // Changed to async
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
     }
 
-    const videoId = req.body.videoId || generateVideoId(); // Extract videoId from filename
+    const videoId = req.body.videoId || generateVideoId();
     const filePath = `/app/uploads/${req.file.filename}`;
     
     console.log(`📁 Video uploaded: ${filePath}`);
 
-    // Start processing but DO NOT await it.
-    processInBackground(videoId, filePath);
+    // Await background processing before responding
+    try {
+        await processInBackground(videoId, filePath);
 
-    // Immediately send a response to the client.
-    // Status 202 Accepted indicates the request is being processed.
-    res.status(202).json({
-        videoId,
-        videoPath: req.file.filename,
-        status: 'Video uploaded successfully'
-    });
+        res.status(200).json({
+            videoId,
+            videoPath: req.file.filename,
+            status: 'Video uploaded and processed successfully'
+        });
+    } catch (error) {
+        console.error(`[${videoId}] Error during processing:`, error);
+        res.status(500).json({
+            videoId,
+            videoPath: req.file.filename,
+            status: 'Video upload failed during processing',
+            error: error.message
+        });
+    }
 });
 
 // Helper function to generate UUID if not provided
